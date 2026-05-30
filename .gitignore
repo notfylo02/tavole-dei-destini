@@ -1,0 +1,7 @@
+# Strumenti di sviluppo locali (non servono per il sito pubblicato)
+.claude/
+
+# File di sistema
+Thumbs.db
+desktop.ini
+.DS_Store

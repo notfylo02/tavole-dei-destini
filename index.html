@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0b0a12" />
+  <title>Tavole dei Destini</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="stars" class="stars" aria-hidden="true"></div>
+
+  <main id="app">
+
+    <!-- ===================== HOME ===================== -->
+    <section class="view" id="view-home" data-view="home">
+      <div class="home-content">
+        <h1 class="home-title">Tavole<span>dei</span>Destini</h1>
+        <p class="home-sub">Tieni premuto per varcare la soglia</p>
+
+        <button class="hold-btn" id="hold-start" aria-label="Incontra il Destino — tieni premuto">
+          <span class="hold-fill" id="hold-fill" aria-hidden="true"></span>
+          <span class="hold-label">Incontra il Destino</span>
+        </button>
+        <p class="home-hint" id="hold-hint">tieni premuto per entrare</p>
+      </div>
+    </section>
+
+    <!-- ===================== SCELTA ===================== -->
+    <section class="view" id="view-choice" data-view="choice">
+      <header class="view-head">
+        <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
+        <h2 class="view-title">Scegli il tuo ruolo</h2>
+        <span class="head-spacer"></span>
+      </header>
+      <div class="choice-grid">
+        <button class="choice-card choice-master" data-goto="master">
+          <div class="choice-glow"></div>
+          <div class="choice-icon">📜</div>
+          <h3>Master</h3>
+          <p>Crea e gestisci le regole, il mondo e le sessioni</p>
+        </button>
+        <button class="choice-card choice-player" data-goto="player">
+          <div class="choice-glow"></div>
+          <div class="choice-icon">⚔️</div>
+          <h3>Player</h3>
+          <p>Accedi alle tue schede personaggio e gioca</p>
+        </button>
+      </div>
+    </section>
+
+    <!-- ===================== MASTER (placeholder) ===================== -->
+    <section class="view" id="view-master" data-view="master">
+      <header class="view-head">
+        <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
+        <h2 class="view-title">Sezione Master</h2>
+        <span class="head-spacer"></span>
+      </header>
+      <div class="placeholder">
+        <div class="placeholder-icon">🛠️</div>
+        <h3>In costruzione</h3>
+        <p>Qui il Master potrà definire regole, manuale, campagne e gestire le sessioni. Lo progetteremo insieme nel prossimo passo.</p>
+      </div>
+    </section>
+
+    <!-- ===================== PLAYER: selezione schede ===================== -->
+    <section class="view" id="view-player" data-view="player">
+      <header class="view-head">
+        <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
+        <h2 class="view-title" id="player-title">Le tue schede</h2>
+        <button class="icon-btn" id="player-menu-btn" aria-label="Opzioni dati">⋯</button>
+      </header>
+
+      <div class="breadcrumb" id="player-breadcrumb"></div>
+
+      <div class="toolbar" id="player-toolbar">
+        <button class="tool-btn primary" data-action="create"><span>＋</span> Crea scheda</button>
+        <button class="tool-btn" data-action="new-folder"><span>📁</span> Crea cartella</button>
+        <button class="tool-btn" data-action="toggle-move"><span>↔</span> Sposta</button>
+        <button class="tool-btn danger" data-action="toggle-delete"><span>🗑</span> Elimina</button>
+      </div>
+
+      <div class="list" id="player-list"></div>
+    </section>
+
+    <!-- ===================== CREAZIONE PG ===================== -->
+    <section class="view" id="view-create" data-view="create">
+      <header class="view-head">
+        <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
+        <h2 class="view-title">Nuovo personaggio</h2>
+        <span class="head-spacer"></span>
+      </header>
+      <form class="create-form" id="create-form" autocomplete="off">
+        <div class="field">
+          <label for="f-nome">Nome</label>
+          <input type="text" id="f-nome" name="nome" required maxlength="40" placeholder="Es. Arannis" />
+        </div>
+        <div class="field">
+          <label for="f-cognome">Cognome</label>
+          <input type="text" id="f-cognome" name="cognome" maxlength="40" placeholder="Es. Mezzanotte" />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="f-razza">Razza</label>
+            <input type="text" id="f-razza" name="razza" maxlength="40" placeholder="Es. Elfo" />
+          </div>
+          <div class="field">
+            <label for="f-classe">Classe</label>
+            <input type="text" id="f-classe" name="classe" maxlength="40" placeholder="Es. Ranger" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-descrizione">Descrizione</label>
+          <textarea id="f-descrizione" name="descrizione" rows="4" maxlength="800" placeholder="Aspetto, storia, personalità..."></textarea>
+        </div>
+        <button type="submit" class="tool-btn primary big">Conferma</button>
+      </form>
+    </section>
+
+    <!-- ===================== SCHEDA PG ===================== -->
+    <section class="view" id="view-sheet" data-view="sheet">
+      <header class="view-head">
+        <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
+        <h2 class="view-title" id="sheet-title">Scheda</h2>
+        <button class="icon-btn" id="sheet-export-btn" aria-label="Esporta scheda">⭳</button>
+      </header>
+
+      <div class="sheet-hero" id="sheet-hero"></div>
+
+      <div class="sheet-nav">
+        <button class="menu-btn" id="sheet-menu-btn" aria-label="Apri menu sezioni" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <span class="sheet-section-label" id="sheet-section-label">Statistiche</span>
+      </div>
+
+      <div class="sheet-panel" id="sheet-panel"></div>
+
+      <!-- Drawer di navigazione sezioni -->
+      <div class="drawer-overlay" id="drawer-overlay"></div>
+      <aside class="drawer" id="sheet-drawer" aria-hidden="true">
+        <div class="drawer-head">
+          <span>Sezioni</span>
+          <button class="icon-btn" id="drawer-close" aria-label="Chiudi menu">×</button>
+        </div>
+        <nav class="drawer-nav" id="drawer-nav">
+          <button class="drawer-item" data-section="statistiche"><span class="tab-ico">📊</span>Statistiche</button>
+          <button class="drawer-item" data-section="abilita"><span class="tab-ico">✨</span>Abilità</button>
+          <button class="drawer-item" data-section="armamenti"><span class="tab-ico">🗡️</span>Armamenti</button>
+          <button class="drawer-item" data-section="zaino"><span class="tab-ico">🎒</span>Zaino</button>
+          <button class="drawer-item" data-section="combattimento"><span class="tab-ico">🔥</span>Combattimento</button>
+        </nav>
+      </aside>
+    </section>
+
+  </main>
+
+  <!-- ===================== MODALE GENERICO ===================== -->
+  <div class="modal-overlay" id="modal-overlay" hidden>
+    <div class="modal" id="modal" role="dialog" aria-modal="true">
+      <h3 class="modal-title" id="modal-title"></h3>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-actions" id="modal-actions"></div>
+    </div>
+  </div>
+
+  <!-- ===================== TOAST ===================== -->
+  <div class="toast" id="toast" hidden></div>
+
+  <input type="file" id="import-file" accept="application/json" hidden />
+
+  <script src="js/storage.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
