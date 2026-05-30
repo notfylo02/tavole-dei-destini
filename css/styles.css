@@ -503,6 +503,162 @@ body {
   .field-row { flex-direction: column; gap: 16px; }
 }
 
+/* ============================================================
+   Sessione / Messaggi / Spotlight  (collegamento tra dispositivi)
+   ============================================================ */
+
+/* hamburger in header (riusa .icon-btn) */
+.nav-burger { font-size: 1.35rem; }
+.nav-burger.glow { animation: burstGlow 1.1s var(--ease) 2; }
+@keyframes burstGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(216,182,119,0); border-color: var(--line); }
+  35%  { box-shadow: 0 0 16px 3px var(--glow); border-color: var(--accent-3); }
+  100% { box-shadow: 0 0 0 0 rgba(216,182,119,0); border-color: var(--line); }
+}
+
+/* pallino "non letti" */
+.nav-burger { position: relative; }
+.unread-dot {
+  position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 10px; background: var(--blood-2);
+  color: #fff; font-size: .68rem; font-weight: 700; line-height: 18px;
+  text-align: center; box-shadow: 0 0 0 2px var(--bg-1); pointer-events: none;
+}
+.drawer-item .unread-dot { position: static; display: inline-block; margin-left: auto; }
+
+/* ---- Plancia Master + Sessione (corpo) ---- */
+.master-body, .session-body { display: flex; flex-direction: column; gap: 16px; }
+
+.panel-card {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: linear-gradient(150deg, var(--surface-2), var(--surface));
+  padding: 18px 16px; animation: cardin .4s var(--ease) both;
+}
+.panel-card h3 { font-family: 'Cinzel', serif; font-size: 1.1rem; margin-bottom: 6px; color: var(--accent-3); }
+.panel-card p.muted { color: var(--text-dim); font-size: .9rem; line-height: 1.5; }
+
+.status-pill {
+  display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  padding: 5px 12px; border-radius: 30px; font-size: .8rem; font-weight: 600;
+  border: 1px solid var(--line-strong); background: var(--surface-3); color: var(--text-dim);
+}
+.status-pill .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); }
+.status-pill.on { color: var(--ok); border-color: rgba(111,143,90,.5); }
+.status-pill.on .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+.status-pill.busy .dot { background: var(--accent-3); animation: pulseDot 1s infinite; }
+@keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* codice stanza */
+.code-display { text-align: center; margin: 6px 0 4px; }
+.code-display .code {
+  font-family: 'Cinzel', serif; font-size: 2.4rem; font-weight: 700; letter-spacing: 8px;
+  color: var(--accent-3); text-shadow: 0 0 18px var(--glow); user-select: all;
+}
+.code-display .code-hint { color: var(--text-dim); font-size: .82rem; margin-top: 4px; }
+
+/* lista membri */
+.member-list { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.member {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface);
+  animation: cardin .35s var(--ease) both;
+}
+.member .m-ico { font-size: 1.1rem; }
+.member .m-name { font-weight: 600; }
+.member .m-role { margin-left: auto; font-size: .72rem; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 1px; }
+.member.is-master .m-role { color: var(--accent-3); }
+
+/* form join */
+.join-form { display: flex; flex-direction: column; gap: 12px; }
+.code-input {
+  text-transform: uppercase; letter-spacing: 6px; font-family: 'Cinzel', serif;
+  text-align: center; font-size: 1.4rem;
+}
+
+/* ---- Chat ---- */
+#view-messages { overflow: hidden; }
+.chat-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.chat-log {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 10px; padding: 4px 2px 6px;
+}
+.chat-empty { margin: auto; text-align: center; color: var(--text-faint); font-size: .92rem; }
+
+.msg { max-width: 82%; display: flex; flex-direction: column; gap: 3px; animation: msgin .28s var(--ease) both; }
+@keyframes msgin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.msg.mine { align-self: flex-end; align-items: flex-end; }
+.msg.theirs { align-self: flex-start; }
+.msg .bubble {
+  padding: 9px 13px; border-radius: 14px; font-size: .95rem; line-height: 1.45;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text);
+  word-break: break-word; white-space: pre-wrap;
+}
+.msg.mine .bubble { background: linear-gradient(150deg, var(--accent), #6f4a1f); border-color: var(--line-strong); }
+.msg .who { font-size: .72rem; color: var(--text-dim); padding: 0 4px; }
+.msg .who .priv { color: var(--accent-3); font-weight: 700; }
+.msg .bubble img { display: block; max-width: 100%; border-radius: 8px; margin-top: 4px; cursor: pointer; }
+.msg.system { align-self: center; max-width: 92%; }
+.msg.system .bubble {
+  background: transparent; border: 1px dashed var(--line); color: var(--text-faint);
+  font-size: .8rem; text-align: center; border-radius: 20px;
+}
+
+/* composer */
+.chat-composer {
+  flex: none; border-top: 1px solid var(--line); padding-top: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.chat-to-row { display: flex; align-items: center; gap: 8px; }
+.chat-to-label { font-size: .8rem; color: var(--text-dim); }
+.chat-to {
+  flex: 1; max-width: 260px; padding: 7px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--surface); color: var(--text);
+  font-size: .88rem; font-family: inherit;
+}
+.chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
+.chat-text {
+  flex: 1; resize: none; max-height: 120px; padding: 11px 13px;
+  border-radius: 14px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); font-family: inherit; font-size: .95rem; line-height: 1.4;
+}
+.chat-text:focus { outline: none; border-color: var(--accent); }
+.chat-attach { font-size: 1.2rem; }
+.chat-send { background: linear-gradient(150deg, var(--accent-2), var(--accent)); color: #1a120a; font-weight: 700; }
+.chat-attach-preview { position: relative; align-self: flex-start; }
+.chat-attach-preview img { max-height: 88px; border-radius: 8px; border: 1px solid var(--line-strong); display: block; }
+.chat-attach-remove {
+  position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; border-radius: 50%;
+  border: none; background: var(--danger); color: #fff; font-size: 1rem; cursor: pointer; line-height: 1;
+}
+
+/* ---- Spotlight (immagine proiettata dal Master) ---- */
+.spotlight {
+  position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.92);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; padding: 20px; animation: fadeIn .3s var(--ease);
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.spotlight-img {
+  max-width: 100%; max-height: 82vh; border-radius: 10px;
+  box-shadow: 0 20px 70px rgba(0,0,0,.8); border: 1px solid var(--line-strong);
+  animation: spotin .45s var(--ease-back) both;
+}
+@keyframes spotin { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+.spotlight-cap {
+  color: var(--text); font-family: 'Cinzel', serif; font-size: 1.15rem; text-align: center;
+  text-shadow: 0 2px 10px #000; max-width: 90%;
+}
+.spotlight-close {
+  position: absolute; top: max(16px, env(safe-area-inset-top)); right: 16px;
+  width: 46px; height: 46px; border-radius: 50%; border: 1px solid var(--line-strong);
+  background: rgba(20,16,12,.7); color: var(--text); font-size: 1.6rem; cursor: pointer; line-height: 1;
+}
+
+@media (max-width: 420px) {
+  .code-display .code { font-size: 2rem; letter-spacing: 5px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .05ms !important; }
 }

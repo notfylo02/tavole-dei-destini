@@ -52,18 +52,14 @@
       </div>
     </section>
 
-    <!-- ===================== MASTER (placeholder) ===================== -->
+    <!-- ===================== MASTER (plancia) ===================== -->
     <section class="view" id="view-master" data-view="master">
       <header class="view-head">
         <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
-        <h2 class="view-title">Sezione Master</h2>
-        <span class="head-spacer"></span>
+        <h2 class="view-title">Plancia del Master</h2>
+        <button class="icon-btn nav-burger" id="master-menu-btn" aria-label="Apri menu">☰</button>
       </header>
-      <div class="placeholder">
-        <div class="placeholder-icon">🛠️</div>
-        <h3>In costruzione</h3>
-        <p>Qui il Master potrà definire regole, manuale, campagne e gestire le sessioni. Lo progetteremo insieme nel prossimo passo.</p>
-      </div>
+      <div class="master-body" id="master-body"></div>
     </section>
 
     <!-- ===================== PLAYER: selezione schede ===================== -->
@@ -71,7 +67,7 @@
       <header class="view-head">
         <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
         <h2 class="view-title" id="player-title">Le tue schede</h2>
-        <button class="icon-btn" id="player-menu-btn" aria-label="Opzioni dati">⋯</button>
+        <button class="icon-btn nav-burger" id="player-menu-btn" aria-label="Apri menu">☰</button>
       </header>
 
       <div class="breadcrumb" id="player-breadcrumb"></div>
@@ -156,7 +152,62 @@
       </aside>
     </section>
 
+    <!-- ===================== SESSIONE (collegamento) ===================== -->
+    <section class="view" id="view-session" data-view="session">
+      <header class="view-head">
+        <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
+        <h2 class="view-title">Sessione</h2>
+        <button class="icon-btn nav-burger" id="session-menu-btn" aria-label="Apri menu">☰</button>
+      </header>
+      <div class="session-body" id="session-body"></div>
+    </section>
+
+    <!-- ===================== MESSAGGI ===================== -->
+    <section class="view" id="view-messages" data-view="messages">
+      <header class="view-head">
+        <button class="icon-btn back-btn" data-back aria-label="Indietro">‹</button>
+        <h2 class="view-title">Messaggi</h2>
+        <button class="icon-btn nav-burger" id="messages-menu-btn" aria-label="Apri menu">☰</button>
+      </header>
+      <div class="chat-wrap">
+        <div class="chat-log" id="chat-log"></div>
+        <div class="chat-composer" id="chat-composer">
+          <div class="chat-to-row">
+            <span class="chat-to-label">A:</span>
+            <select class="chat-to" id="chat-to" aria-label="Destinatario"></select>
+          </div>
+          <div class="chat-input-row">
+            <button class="icon-btn chat-attach" id="chat-attach-btn" aria-label="Allega immagine">🖼</button>
+            <textarea class="chat-text" id="chat-text" rows="1" maxlength="1200" placeholder="Scrivi un messaggio..."></textarea>
+            <button class="icon-btn chat-send" id="chat-send-btn" aria-label="Invia">➤</button>
+          </div>
+          <div class="chat-attach-preview" id="chat-attach-preview" hidden>
+            <img id="chat-attach-img" alt="anteprima" />
+            <button class="chat-attach-remove" id="chat-attach-remove" aria-label="Rimuovi immagine">×</button>
+          </div>
+        </div>
+      </div>
+      <input type="file" id="chat-file" accept="image/*" hidden />
+    </section>
+
   </main>
+
+  <!-- ===================== DRAWER NAVIGAZIONE APP ===================== -->
+  <div class="drawer-overlay" id="app-drawer-overlay"></div>
+  <aside class="drawer" id="app-drawer" aria-hidden="true">
+    <div class="drawer-head">
+      <span>Menu</span>
+      <button class="icon-btn" id="app-drawer-close" aria-label="Chiudi menu">×</button>
+    </div>
+    <nav class="drawer-nav" id="app-drawer-nav"></nav>
+  </aside>
+
+  <!-- ===================== IMMAGINE PROIETTATA (spotlight) ===================== -->
+  <div class="spotlight" id="spotlight" hidden>
+    <img class="spotlight-img" id="spotlight-img" alt="Immagine condivisa dal Master" />
+    <div class="spotlight-cap" id="spotlight-cap"></div>
+    <button class="spotlight-close" id="spotlight-close" aria-label="Chiudi immagine">×</button>
+  </div>
 
   <!-- ===================== MODALE GENERICO ===================== -->
   <div class="modal-overlay" id="modal-overlay" hidden>
@@ -172,7 +223,9 @@
 
   <input type="file" id="import-file" accept="application/json" hidden />
 
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="js/storage.js"></script>
+  <script src="js/net.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

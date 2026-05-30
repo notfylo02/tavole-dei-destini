@@ -23,11 +23,13 @@
   var playerMode = null;        // null | 'move' | 'delete'
   var currentCharId = null;
   var currentSection = 'statistiche';
+  var appRole = 'player';       // 'master' | 'player' — ruolo corrente (per menu e sessione)
 
   function showView(name, isBack) {
     var next = document.getElementById('view-' + name);
     if (!next) return;
     if (typeof closeDrawer === 'function') closeDrawer(); // chiudi il menu sezioni in ogni navigazione
+    if (typeof closeAppDrawer === 'function') closeAppDrawer(); // chiudi il menu app
     $all('.view').forEach(function (v) {
       if (v === next || !v.classList.contains('active')) return;
       v.classList.add('leaving-back');
@@ -55,6 +57,9 @@
   function onEnter(name) {
     if (name === 'player') { renderPlayer(); }
     if (name === 'sheet') { /* gestito da openSheet */ }
+    if (name === 'master') { renderMaster(); }
+    if (name === 'session') { renderSession(); }
+    if (name === 'messages') { renderMessages(); clearUnread(); }
   }
 
   /* ============================================================
@@ -180,7 +185,8 @@
   $all('[data-goto]').forEach(function (c) {
     c.addEventListener('click', function () {
       var target = c.getAttribute('data-goto');
-      if (target === 'player') { currentFolderId = null; playerMode = null; }
+      if (target === 'player') { currentFolderId = null; playerMode = null; appRole = 'player'; }
+      if (target === 'master') { appRole = 'master'; }
       go(target);
     });
   });
@@ -454,19 +460,20 @@
     }
   }
 
-  // ridimensiona e comprime l'immagine prima di salvarla in locale
-  function processImage(file) {
+  // ridimensiona e comprime l'immagine prima di salvarla/inviarla
+  function processImage(file, max, quality) {
+    max = max || 512; quality = quality || 0.82;
     return new Promise(function (resolve, reject) {
       var url = URL.createObjectURL(file);
       var img = new Image();
       img.onload = function () {
         URL.revokeObjectURL(url);
-        var max = 512, w = img.width, h = img.height;
+        var w = img.width, h = img.height;
         var scale = Math.min(1, max / Math.max(w, h));
         var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
         var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
         cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
-        try { resolve(cv.toDataURL('image/jpeg', 0.82)); }
+        try { resolve(cv.toDataURL('image/jpeg', quality)); }
         catch (e) { reject(e); }
       };
       img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('Immagine non valida')); };
@@ -915,7 +922,7 @@
   /* ============================================================
      MENU dati (export/import) — nella sezione player
      ============================================================ */
-  $('#player-menu-btn').addEventListener('click', function () {
+  function openDataMenu() {
     var wrap = document.createElement('div');
     wrap.className = 'modal-list';
     function opt(label, icon, fn) {
@@ -927,7 +934,7 @@
     opt('Esporta backup completo', '⭳', function () { Store.exportAll(state); closeModal(); toast('Backup esportato', 'ok'); });
     opt('Importa dati / scheda', '⭱', function () { closeModal(); $('#import-file').click(); });
     openModal({ title: 'Dati e backup', bodyNode: wrap, actions: [{ label: 'Chiudi', onClick: closeModal }] });
-  });
+  }
 
   $('#import-file').addEventListener('change', function (e) {
     var file = e.target.files[0];
@@ -974,6 +981,420 @@
   });
 
   /* ============================================================
+     COLLEGAMENTO DI SESSIONE (rete) · MESSAGGI · SPOTLIGHT
+     ============================================================ */
+  var chatMessages = [];     // { id, from, name, text, image, ts, to, system }
+  var unread = 0;
+  var netMembers = [];
+  var currentTo = 'all';
+  var pendingAttach = null;  // dataURL immagine in attesa di invio
+  var spotlightShared = false;
+
+  /* ---- nome visualizzato per la sessione (ricordato in locale) ---- */
+  function netName(def) {
+    var n = '';
+    try { n = localStorage.getItem('tdd-net-name') || ''; } catch (e) {}
+    return n || def || '';
+  }
+  function saveNetName(n) { try { localStorage.setItem('tdd-net-name', n); } catch (e) {} }
+
+  /* ---- piccoli helper UI ---- */
+  function btn(label, cls, fn) {
+    var b = document.createElement('button');
+    b.className = 'tool-btn ' + (cls || '');
+    b.innerHTML = label;
+    b.addEventListener('click', fn);
+    return b;
+  }
+  function panelCard(title, html) {
+    var c = document.createElement('div'); c.className = 'panel-card';
+    c.innerHTML = '<h3>' + esc(title) + '</h3>' + (html ? '<p class="muted">' + html + '</p>' : '');
+    return c;
+  }
+
+  /* ---- App drawer (menu di navigazione globale, diverso per ruolo) ---- */
+  function buildAppDrawer() {
+    var nav = $('#app-drawer-nav');
+    nav.innerHTML = '';
+    var items = [];
+    if (appRole === 'master') {
+      items.push({ ico: '🛠️', label: 'Plancia', go: function () { navTo('master'); } });
+      items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
+      items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
+      items.push({ ico: '🖼️', label: 'Mostra immagine a tutti', go: function () { closeAppDrawer(); pickBroadcastImage(); } });
+    } else {
+      items.push({ ico: '🗂️', label: 'Le tue schede', go: function () { navTo('player'); } });
+      items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
+      items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
+      items.push({ ico: '💾', label: 'Dati e backup', go: function () { closeAppDrawer(); openDataMenu(); } });
+    }
+    items.forEach(function (it) {
+      var b = document.createElement('button');
+      b.className = 'drawer-item';
+      b.innerHTML = '<span class="tab-ico">' + it.ico + '</span>' + esc(it.label);
+      if (it.badge && unread > 0) {
+        var d = document.createElement('span'); d.className = 'unread-dot';
+        d.textContent = unread > 9 ? '9+' : unread; b.appendChild(d);
+      }
+      b.addEventListener('click', it.go);
+      nav.appendChild(b);
+    });
+  }
+  function openAppDrawer() {
+    buildAppDrawer();
+    $('#app-drawer').classList.add('open');
+    $('#app-drawer-overlay').classList.add('open');
+    $('#app-drawer').setAttribute('aria-hidden', 'false');
+  }
+  function closeAppDrawer() {
+    $('#app-drawer').classList.remove('open');
+    $('#app-drawer-overlay').classList.remove('open');
+    $('#app-drawer').setAttribute('aria-hidden', 'true');
+  }
+  // naviga a una vista "principale" (evita di ri-aprire la stessa)
+  function navTo(name) {
+    closeAppDrawer();
+    if (currentView === name) return;
+    go(name);
+  }
+
+  /* ---- Notifiche non lette (pallino + breve evidenza) ---- */
+  function refreshUnreadUI() {
+    $all('.nav-burger').forEach(function (b) {
+      var d = b.querySelector('.unread-dot');
+      if (unread > 0) {
+        if (!d) { d = document.createElement('span'); d.className = 'unread-dot'; b.appendChild(d); }
+        d.textContent = unread > 9 ? '9+' : unread;
+      } else if (d) { d.remove(); }
+    });
+  }
+  function clearUnread() { unread = 0; refreshUnreadUI(); }
+  function flashBurger() {
+    $all('.nav-burger').forEach(function (b) {
+      b.classList.remove('glow'); void b.offsetWidth; b.classList.add('glow');
+      setTimeout(function () { b.classList.remove('glow'); }, 2400);
+    });
+  }
+
+  /* ---- Eventi dalla rete ---- */
+  function setupNet() {
+    if (typeof Net === 'undefined') return;
+    Net.on('status', function (s) {
+      if (s.state === 'error') toast(s.message || 'Errore di connessione', 'err');
+      else if (s.state === 'closed') toast(s.message || 'Sessione chiusa', 'err');
+      else if (s.state === 'hosting') toast('Sessione avviata', 'ok');
+      else if (s.state === 'connected') toast('Collegato alla sessione', 'ok');
+      if (currentView === 'session') renderSession();
+      if (currentView === 'master') renderMaster();
+      if (currentView === 'messages') updateComposerState();
+    });
+    Net.on('roster', function (members) {
+      netMembers = members || [];
+      if (currentView === 'session') renderSession();
+      if (currentView === 'master') renderMaster();
+      rebuildRecipients();
+    });
+    Net.on('chat', function (msg) { addChatMessage(msg); });
+    Net.on('sys', function (d) { addChatMessage({ system: true, text: d.text, ts: Date.now(), id: 'sys-' + Math.random() }); });
+    Net.on('image', function (d) { showSpotlight(d.image, d.caption, true); });
+    Net.on('image-close', function () { hideSpotlight(); });
+  }
+
+  function addChatMessage(msg) {
+    chatMessages.push(msg);
+    if (chatMessages.length > 300) chatMessages.shift();
+    if (currentView === 'messages') {
+      appendChatNode(msg);
+      scrollChatBottom();
+    } else if (!msg.system) {
+      unread++; refreshUnreadUI(); flashBurger();
+    }
+  }
+
+  /* ---- Vista MASTER (plancia) ---- */
+  function renderMaster() {
+    var body = $('#master-body');
+    if (!body) return;
+    body.innerHTML = '';
+    var st = Net.status();
+    var on = st.connected;
+
+    var card = document.createElement('div'); card.className = 'panel-card';
+    card.innerHTML = '<h3>Sessione</h3>';
+    var pill = document.createElement('span');
+    pill.className = 'status-pill ' + (on ? 'on' : (st.state === 'connecting' ? 'busy' : ''));
+    pill.innerHTML = '<span class="dot"></span>' +
+      (on ? ('Attiva · codice ' + esc(st.code || '')) : (st.state === 'connecting' ? 'Avvio in corso…' : 'Non avviata'));
+    card.appendChild(pill);
+    var acts = document.createElement('div');
+    acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;';
+    if (on) {
+      acts.appendChild(btn('🖼️ Mostra immagine', 'primary', pickBroadcastImage));
+      acts.appendChild(btn('🔗 Gestisci sessione', '', function () { navTo('session'); }));
+      acts.appendChild(btn('💬 Messaggi', '', function () { navTo('messages'); }));
+    } else {
+      acts.appendChild(btn('⚔️ Avvia sessione', 'primary', function () { navTo('session'); }));
+    }
+    card.appendChild(acts);
+    body.appendChild(card);
+
+    if (on) body.appendChild(membersCard(st));
+    body.appendChild(panelCard('Regole e manuale', 'Qui potrai definire le regole del tuo gioco: lo progetteremo nel prossimo passo.'));
+  }
+
+  /* ---- Vista SESSIONE ---- */
+  function renderSession() {
+    var body = $('#session-body');
+    if (!body) return;
+    body.innerHTML = '';
+    if (!Net.available()) {
+      body.appendChild(panelCard('Collegamento non disponibile',
+        'Per collegare i dispositivi serve la connessione a internet. Riprova quando sei online.'));
+      return;
+    }
+    var st = Net.status();
+    if (appRole === 'master') renderSessionMaster(body, st);
+    else renderSessionPlayer(body, st);
+  }
+
+  function membersCard(st) {
+    var c = document.createElement('div'); c.className = 'panel-card';
+    var members = st.members || [];
+    c.innerHTML = '<h3>Collegati (' + members.length + ')</h3>';
+    var list = document.createElement('div'); list.className = 'member-list';
+    members.forEach(function (m) {
+      var row = document.createElement('div'); row.className = 'member' + (m.role === 'master' ? ' is-master' : '');
+      row.innerHTML =
+        '<span class="m-ico">' + (m.role === 'master' ? '📜' : '⚔️') + '</span>' +
+        '<span class="m-name">' + esc(m.name) + (m.id === st.myId ? ' (tu)' : '') + '</span>' +
+        '<span class="m-role">' + (m.role === 'master' ? 'Master' : 'Player') + '</span>';
+      list.appendChild(row);
+    });
+    c.appendChild(list);
+    if (members.length <= 1 && st.role === 'master') {
+      var p = document.createElement('p'); p.className = 'muted'; p.style.marginTop = '8px';
+      p.textContent = 'In attesa che i giocatori inseriscano il codice…';
+      c.appendChild(p);
+    }
+    return c;
+  }
+
+  function renderSessionMaster(body, st) {
+    var card = document.createElement('div'); card.className = 'panel-card';
+    if (st.connected) {
+      card.innerHTML =
+        '<h3>Sessione attiva</h3>' +
+        '<div class="code-display"><div class="code">' + esc(st.code || '') + '</div>' +
+        '<div class="code-hint">Condividi questo codice con i giocatori sulla stessa rete/hotspot</div></div>';
+      var actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;';
+      actions.appendChild(btn('🖼️ Mostra immagine a tutti', 'primary', pickBroadcastImage));
+      actions.appendChild(btn('💬 Messaggi', '', function () { navTo('messages'); }));
+      actions.appendChild(btn('Termina sessione', 'danger', function () { Net.leave(); }));
+      card.appendChild(actions);
+      body.appendChild(card);
+      body.appendChild(membersCard(st));
+    } else {
+      card.innerHTML = '<h3>Avvia una sessione</h3><p class="muted">Crea una stanza e ottieni un codice da condividere. I giocatori potranno collegarsi, scriverti e vedere le immagini che proietti.</p>';
+      var field = document.createElement('div'); field.className = 'field'; field.style.marginTop = '12px';
+      field.innerHTML = '<label>Il tuo nome</label><input id="host-name" maxlength="24" placeholder="Master" />';
+      field.querySelector('input').value = netName('Master');
+      card.appendChild(field);
+      var connecting = (st.state === 'connecting');
+      var start = btn(connecting ? 'Avvio in corso…' : '⚔️ Avvia sessione', 'primary big', function () {
+        var n = (field.querySelector('input').value || '').trim() || 'Master';
+        saveNetName(n); Net.host(n);
+      });
+      start.style.marginTop = '12px';
+      if (connecting) start.disabled = true;
+      card.appendChild(start);
+      body.appendChild(card);
+    }
+  }
+
+  function renderSessionPlayer(body, st) {
+    if (st.connected) {
+      var card = document.createElement('div'); card.className = 'panel-card';
+      card.innerHTML = '<h3>Sei in sessione</h3><p class="muted">Codice stanza: <b>' + esc(st.code || '') + '</b></p>';
+      var actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;';
+      actions.appendChild(btn('💬 Vai ai messaggi', 'primary', function () { navTo('messages'); }));
+      actions.appendChild(btn('Esci dalla sessione', 'danger', function () { Net.leave(); }));
+      card.appendChild(actions);
+      body.appendChild(card);
+      body.appendChild(membersCard(st));
+    } else {
+      var card2 = document.createElement('div'); card2.className = 'panel-card';
+      card2.innerHTML = '<h3>Entra in una sessione</h3><p class="muted">Inserisci il codice che ti ha dato il Master. Dovete essere sulla stessa rete o hotspot.</p>';
+      var form = document.createElement('div'); form.className = 'join-form'; form.style.marginTop = '12px';
+      form.innerHTML =
+        '<div class="field"><label>Il tuo nome</label><input id="join-name" maxlength="24" placeholder="Es. Arannis" /></div>' +
+        '<div class="field"><label>Codice sessione</label><input id="join-code" class="code-input" maxlength="6" placeholder="ABC123" /></div>';
+      form.querySelector('#join-name').value = netName('');
+      var ci = form.querySelector('#join-code');
+      ci.addEventListener('input', function () { this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); });
+      var connecting = (st.state === 'connecting');
+      var jb = btn(connecting ? 'Collegamento…' : '🔗 Entra', 'primary big', function () {
+        var n = (form.querySelector('#join-name').value || '').trim();
+        var code = (ci.value || '').trim();
+        if (!n) { toast('Inserisci il tuo nome', 'err'); return; }
+        if (!code) { toast('Inserisci il codice', 'err'); return; }
+        saveNetName(n); Net.join(code, n);
+      });
+      jb.style.marginTop = '4px';
+      if (connecting) jb.disabled = true;
+      form.appendChild(jb);
+      card2.appendChild(form);
+      body.appendChild(card2);
+    }
+  }
+
+  /* ---- Vista MESSAGGI (chat) ---- */
+  function renderMessages() {
+    var log = $('#chat-log');
+    if (!log) return;
+    log.innerHTML = '';
+    if (chatMessages.length === 0) {
+      var e = document.createElement('div'); e.className = 'chat-empty';
+      e.innerHTML = Net.status().connected
+        ? 'Nessun messaggio. Scrivi qualcosa per iniziare.'
+        : 'Non sei collegato a una sessione.<br>Apri <b>Sessione</b> dal menu ☰ per ' + (appRole === 'master' ? 'avviarne una.' : 'entrare con un codice.');
+      log.appendChild(e);
+    } else {
+      chatMessages.forEach(appendChatNode);
+    }
+    rebuildRecipients();
+    updateComposerState();
+    scrollChatBottom();
+  }
+
+  function appendChatNode(msg) {
+    var log = $('#chat-log');
+    var empty = log.querySelector('.chat-empty'); if (empty) empty.remove();
+    if (msg.system) {
+      var sn = document.createElement('div'); sn.className = 'msg system';
+      sn.innerHTML = '<div class="bubble">' + esc(msg.text) + '</div>';
+      log.appendChild(sn); return;
+    }
+    var myId = Net.status().myId;
+    var mine = msg.from === myId;
+    var node = document.createElement('div');
+    node.className = 'msg ' + (mine ? 'mine' : 'theirs');
+    var priv = msg.to && msg.to !== 'all';
+    var who = (mine ? 'Tu' : esc(msg.name || 'Anonimo')) + (priv ? ' <span class="priv">· privato</span>' : '');
+    var html = '<div class="who">' + who + '</div><div class="bubble">';
+    if (msg.text) html += esc(msg.text);
+    if (msg.image) html += '<img src="' + msg.image + '" alt="immagine" />';
+    html += '</div>';
+    node.innerHTML = html;
+    var img = node.querySelector('img');
+    if (img) img.addEventListener('click', function () { showSpotlight(msg.image, '', false); });
+    log.appendChild(node);
+  }
+
+  function scrollChatBottom() { var log = $('#chat-log'); if (log) log.scrollTop = log.scrollHeight; }
+
+  function rebuildRecipients() {
+    var sel = $('#chat-to'); if (!sel) return;
+    var myId = Net.status().myId;
+    var prev = currentTo;
+    sel.innerHTML = '';
+    function add(val, label) { var o = document.createElement('option'); o.value = val; o.textContent = label; sel.appendChild(o); }
+    add('all', 'Tutti');
+    netMembers.forEach(function (m) {
+      if (m.id === myId) return;
+      add(m.id, m.name + (m.role === 'master' ? ' (Master)' : ''));
+    });
+    var has = Array.prototype.some.call(sel.options, function (o) { return o.value === prev; });
+    currentTo = has ? prev : 'all';
+    sel.value = currentTo;
+  }
+
+  function updateComposerState() {
+    var on = Net.status().connected;
+    ['#chat-text', '#chat-send-btn', '#chat-attach-btn', '#chat-to'].forEach(function (s) {
+      var el = $(s); if (el) el.disabled = !on;
+    });
+    var ta = $('#chat-text');
+    if (ta) ta.placeholder = on ? 'Scrivi un messaggio...' : 'Collegati a una sessione per scrivere';
+  }
+
+  function sendCurrentMessage() {
+    var ta = $('#chat-text');
+    var text = (ta.value || '').trim();
+    if (!text && !pendingAttach) return;
+    if (!Net.status().connected) { toast('Non sei collegato a una sessione', 'err'); return; }
+    if (Net.sendChat(text, pendingAttach, currentTo)) {
+      ta.value = ''; clearAttach(); autoGrow(ta);
+    }
+  }
+  function clearAttach() { pendingAttach = null; var p = $('#chat-attach-preview'); if (p) p.hidden = true; var i = $('#chat-attach-img'); if (i) i.src = ''; }
+  function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(120, ta.scrollHeight) + 'px'; }
+
+  /* ---- Spotlight (immagine a schermo intero) ---- */
+  function showSpotlight(image, caption, shared) {
+    if (!image) return;
+    spotlightShared = !!shared;
+    $('#spotlight-img').src = image;
+    var cap = $('#spotlight-cap');
+    cap.textContent = caption || '';
+    cap.style.display = caption ? '' : 'none';
+    $('#spotlight').hidden = false;
+  }
+  function hideSpotlight() {
+    $('#spotlight').hidden = true;
+    $('#spotlight-img').src = '';
+    spotlightShared = false;
+  }
+
+  /* ---- Master: scegli e proietta un'immagine a tutti ---- */
+  var broadcastInput = document.createElement('input');
+  broadcastInput.type = 'file'; broadcastInput.accept = 'image/*'; broadcastInput.hidden = true;
+  document.body.appendChild(broadcastInput);
+  broadcastInput.addEventListener('change', function (e) {
+    var file = e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    toast('Invio immagine in corso…');
+    processImage(file, 1280, 0.8).then(function (dataUrl) { Net.broadcastImage(dataUrl, ''); })
+      .catch(function () { toast('Immagine non valida', 'err'); });
+  });
+  function pickBroadcastImage() {
+    if (appRole !== 'master') return;
+    if (!Net.status().connected) { toast('Avvia prima la sessione', 'err'); navTo('session'); return; }
+    broadcastInput.click();
+  }
+
+  /* ---- wiring eventi DOM (sessione/messaggi/spotlight/drawer) ---- */
+  ['#player-menu-btn', '#master-menu-btn', '#session-menu-btn', '#messages-menu-btn'].forEach(function (s) {
+    var el = $(s); if (el) el.addEventListener('click', openAppDrawer);
+  });
+  $('#app-drawer-overlay').addEventListener('click', closeAppDrawer);
+  $('#app-drawer-close').addEventListener('click', closeAppDrawer);
+
+  $('#chat-send-btn').addEventListener('click', sendCurrentMessage);
+  $('#chat-text').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCurrentMessage(); }
+  });
+  $('#chat-text').addEventListener('input', function () { autoGrow(this); });
+  $('#chat-to').addEventListener('change', function () { currentTo = this.value; });
+  $('#chat-attach-btn').addEventListener('click', function () { $('#chat-file').click(); });
+  $('#chat-file').addEventListener('change', function (e) {
+    var file = e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    processImage(file, 1280, 0.8).then(function (dataUrl) {
+      pendingAttach = dataUrl;
+      $('#chat-attach-img').src = dataUrl;
+      $('#chat-attach-preview').hidden = false;
+    }).catch(function () { toast('Immagine non valida', 'err'); });
+  });
+  $('#chat-attach-remove').addEventListener('click', clearAttach);
+
+  $('#spotlight-close').addEventListener('click', function () {
+    if (spotlightShared && appRole === 'master') Net.closeImage();
+    else hideSpotlight();
+  });
+
+  /* ============================================================
      Sfondo stellato
      ============================================================ */
   function initStars() {
@@ -996,6 +1417,7 @@
      ============================================================ */
   initStars();
   initHold();
+  setupNet();
   showView('home');
   currentView = 'home';
 })();
