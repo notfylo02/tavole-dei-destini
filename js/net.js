@@ -212,7 +212,7 @@
   function leave() { cleanup(); emit('status', { state: 'idle' }); emit('roster', []); }
   function cleanup() {
     try { Object.keys(conns).forEach(function (id) { try { conns[id].close(); } catch (e) {} }); } catch (e) {}
-    conns = {}; roster = []; connected = false; masterPeerId = null; myCode = null;
+    conns = {}; roster = []; connected = false; masterPeerId = null; myCode = null; role = null;
     if (peer) { try { peer.destroy(); } catch (e) {} peer = null; }
   }
 

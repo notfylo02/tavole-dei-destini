@@ -975,6 +975,7 @@
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
+      if (!$('#spotlight').hidden) { closeSpotlightByUser(); return; }
       if (!$('#modal-overlay').hidden) { closeModal(); return; }
       if (currentView && currentView !== 'home') back();
     }
@@ -1389,9 +1390,18 @@
   });
   $('#chat-attach-remove').addEventListener('click', clearAttach);
 
-  $('#spotlight-close').addEventListener('click', function () {
-    if (spotlightShared && appRole === 'master') Net.closeImage();
-    else hideSpotlight();
+  // Chiusura spotlight richiesta dall'utente: chiude SEMPRE in locale,
+  // e se è il master a chiudere un'immagine condivisa la fa sparire a tutti.
+  function closeSpotlightByUser() {
+    if (spotlightShared && appRole === 'master' && typeof Net !== 'undefined') {
+      try { Net.closeImage(); } catch (e) {}
+    }
+    hideSpotlight();
+  }
+  $('#spotlight-close').addEventListener('click', function (e) { e.stopPropagation(); closeSpotlightByUser(); });
+  // tocca lo sfondo scuro (fuori dall'immagine) per chiudere
+  $('#spotlight').addEventListener('click', function (e) {
+    if (e.target === this) closeSpotlightByUser();
   });
 
   /* ============================================================
