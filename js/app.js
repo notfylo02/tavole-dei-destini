@@ -1428,6 +1428,7 @@
   initStars();
   initHold();
   setupNet();
+  hideSpotlight();           // mai mostrare lo spotlight all'avvio
   showView('home');
   currentView = 'home';
 })();
