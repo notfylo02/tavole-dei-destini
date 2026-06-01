@@ -668,34 +668,78 @@ body {
 .ab-points .ap-val { font-family: 'Cinzel', serif; font-size: 1.7rem; font-weight: 700; color: var(--accent-3); }
 .ab-hint { font-size: .72rem; color: var(--text-faint); text-align: right; max-width: 45%; }
 
-.ability-tree { margin: 14px 2px; border: 1px solid var(--line); border-radius: var(--radius);
-  background: linear-gradient(160deg, var(--surface-2), var(--surface)); padding: 14px 12px; animation: cardin .4s var(--ease) both; }
-.tree-head h4 { font-family: 'Cinzel', serif; font-size: 1.1rem; color: var(--accent-3); }
-.tree-head p { color: var(--text-dim); font-size: .85rem; margin-top: 2px; line-height: 1.4; }
-
-.tree-canvas { position: relative; margin-top: 12px; }
-.tree-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
-.tree-links .lnk { stroke: var(--line-strong); stroke-width: 2; }
-.tree-links .lnk.on { stroke: var(--accent-3); stroke-width: 2.5; filter: drop-shadow(0 0 3px var(--glow)); }
-.tree-tiers { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 26px; }
-.tree-tier { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
-
-.ability-node {
-  position: relative; width: 110px; min-height: 78px; padding: 8px 8px 7px; cursor: pointer;
-  border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface-3); color: var(--text);
-  display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center;
-  transition: transform .18s var(--ease-back), border-color .25s, box-shadow .25s, background .25s;
+/* lista abilità del giocatore (ogni card apre il suo albero) */
+.ability-card {
+  width: 100%; text-align: left; cursor: pointer; margin: 10px 0 0;
+  display: flex; align-items: center; gap: 12px; padding: 14px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: linear-gradient(150deg, var(--surface-2), var(--surface)); color: var(--text);
+  transition: transform .18s var(--ease-back), border-color .25s, background .25s;
+  animation: cardin .35s var(--ease) both;
 }
-.ability-node:active { transform: scale(.94); }
-.ability-node .nd-ico { font-size: 1.25rem; line-height: 1; }
-.ability-node .nd-name { font-size: .82rem; font-weight: 600; line-height: 1.15; }
-.ability-node .nd-meta { font-size: .66rem; color: var(--text-dim); display: flex; gap: 5px; align-items: center; flex-wrap: wrap; justify-content: center; }
-.ability-node .nd-rank { background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; font-weight: 700; color: var(--accent-3); }
-.ability-node.locked { opacity: .55; filter: grayscale(.5); border-style: dashed; }
-.ability-node.available { border-color: var(--accent-3); box-shadow: 0 0 14px var(--glow); }
-.ability-node.taken { background: linear-gradient(160deg, #3a2a14, var(--surface-3)); border-color: var(--accent-2); }
-.ability-node.taken .nd-ico { color: var(--accent-3); }
-.ability-node.maxed { box-shadow: none; }
+.ability-card:hover { border-color: var(--line-strong); }
+.ability-card:active { transform: scale(.98); }
+.ability-card .ac-ico { font-size: 1.5rem; flex: none; }
+.ability-card .ac-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ability-card .ac-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.05rem; color: var(--accent-3); }
+.ability-card .ac-sub { font-size: .82rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ability-card .ac-prog { font-size: .72rem; color: var(--text-faint); }
+.ability-card .chev { color: var(--text-faint); font-size: 1.5rem; flex: none; }
+
+/* ---- Overlay albero abilità (vero skill-tree a tutto schermo) ---- */
+.ability-overlay {
+  position: fixed; inset: 0; z-index: 90; background: radial-gradient(120% 80% at 50% 0%, #1a140d 0%, var(--bg-0) 70%);
+  display: flex; flex-direction: column; animation: fadeIn .25s var(--ease);
+}
+.ability-overlay[hidden] { display: none !important; }
+.ao-head {
+  flex: none; display: flex; align-items: center; gap: 12px;
+  padding: max(14px, env(safe-area-inset-top)) 16px 12px; border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(0,0,0,.4), transparent);
+}
+.ao-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ao-title { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.2rem; color: var(--accent-3); }
+.ao-sub { font-size: .8rem; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ao-points { flex: none; font-weight: 700; color: var(--accent-3); background: var(--surface-3);
+  border: 1px solid var(--line-strong); border-radius: 30px; padding: 6px 14px; font-size: .9rem; white-space: nowrap; }
+.ao-scroll { flex: 1; min-height: 0; overflow: auto; padding: 30px 20px 60px; }
+
+/* tela e connettori dell'albero */
+.tree-canvas { position: relative; width: max-content; min-width: 100%; margin: 0 auto; }
+.tree-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+.tree-links .lnk { stroke: var(--line-strong); stroke-width: 2.5; }
+.tree-links .lnk.on { stroke: var(--accent-3); stroke-width: 3; filter: drop-shadow(0 0 4px var(--glow)); }
+.tree-tiers { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 46px; }
+.tree-tier { display: flex; flex-wrap: wrap; gap: 30px; justify-content: center; }
+
+/* nodo = orb tondo + etichetta sotto */
+.ability-node {
+  position: relative; width: 92px; cursor: pointer; background: none; border: none; padding: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 7px; color: var(--text);
+  transition: transform .18s var(--ease-back);
+}
+.ability-node:active { transform: scale(.93); }
+.ability-node .nd-orb {
+  position: relative; width: 62px; height: 62px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 2px solid var(--line-strong); background: radial-gradient(circle at 35% 30%, var(--surface-3), #0d0a07);
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.5);
+  transition: border-color .25s, box-shadow .25s, background .25s, transform .2s var(--ease-back);
+}
+.ability-node .nd-ico { font-size: 1.5rem; line-height: 1; }
+.ability-node .nd-name { font-size: .8rem; font-weight: 600; line-height: 1.15; text-align: center; max-width: 92px; }
+.ability-node .nd-cost { font-size: .66rem; color: var(--text-dim); }
+.ability-node .nd-rank {
+  position: absolute; bottom: -6px; right: -6px; min-width: 22px; height: 22px; padding: 0 5px;
+  border-radius: 11px; background: var(--surface); border: 1px solid var(--accent-2); color: var(--accent-3);
+  font-size: .68rem; font-weight: 700; line-height: 20px; text-align: center;
+}
+.ability-node.locked .nd-orb { border-style: dashed; opacity: .6; }
+.ability-node.locked .nd-name { color: var(--text-faint); }
+.ability-node.available .nd-orb { border-color: var(--accent-3); box-shadow: 0 0 18px var(--glow), inset 0 2px 6px rgba(0,0,0,.4); animation: orbPulse 1.8s ease-in-out infinite; }
+.ability-node.taken .nd-orb { border-color: var(--accent-2); background: radial-gradient(circle at 35% 30%, #6a4a22, #2a1d10); box-shadow: 0 0 14px var(--glow); }
+.ability-node.taken .nd-ico { color: #f0d9a8; }
+@keyframes orbPulse { 0%,100% { box-shadow: 0 0 10px var(--glow), inset 0 2px 6px rgba(0,0,0,.4); } 50% { box-shadow: 0 0 22px var(--glow), inset 0 2px 6px rgba(0,0,0,.4); } }
 
 .nd-bits { color: var(--text-dim); font-size: .85rem; margin-top: 8px; }
 .nd-warn { color: var(--blood-2); font-size: .85rem; margin-top: 8px; font-weight: 600; }

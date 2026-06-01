@@ -103,6 +103,25 @@
       nodes: Array.isArray(t.nodes) ? t.nodes.map(normalizeNode) : []
     };
   }
+  // Un'abilità = un albero {id,name,desc,nodes}. Alias semantico di normalizeTree.
+  function normalizeAbility(a) {
+    a = a || {};
+    var na = normalizeTree(a);
+    na.targetMemberId = a.targetMemberId || null; // ultimo destinatario (comodità Master)
+    na.targetName = a.targetName || '';
+    return na;
+  }
+  // Una classe = cartella organizzativa del Master con dentro più abilità.
+  function normalizeClass(c) {
+    c = c || {};
+    return {
+      id: c.id || genId(),
+      name: typeof c.name === 'string' ? c.name : 'Classe',
+      desc: typeof c.desc === 'string' ? c.desc : '',
+      abilities: Array.isArray(c.abilities) ? c.abilities.map(normalizeAbility) : []
+    };
+  }
+
   // Converte eventuali vecchie voci piatte {id,name,desc} in un albero unico.
   function migrateAbilita(arr) {
     if (!Array.isArray(arr) || arr.length === 0) return [];
@@ -131,9 +150,16 @@
       data.characters = Array.isArray(data.characters) ? data.characters : [];
       data.folders = Array.isArray(data.folders) ? data.folders : [];
       data.master = data.master || {};
-      data.master.trees = Array.isArray(data.master.trees) ? data.master.trees.map(function (t) {
-        var nt = normalizeTree(t); nt.targetMemberId = t.targetMemberId || null; nt.targetName = t.targetName || ''; return nt;
-      }) : [];
+      // Gerarchia: master.classes = [{ id, name, desc, abilities:[ability] }]
+      if (Array.isArray(data.master.classes)) {
+        data.master.classes = data.master.classes.map(normalizeClass);
+      } else if (Array.isArray(data.master.trees) && data.master.trees.length) {
+        // migrazione: i vecchi alberi diventano abilità in una classe "Generale"
+        data.master.classes = [normalizeClass({ name: 'Generale', abilities: data.master.trees })];
+      } else {
+        data.master.classes = [];
+      }
+      delete data.master.trees;
       // normalizza schede mancanti
       data.characters.forEach(function (c) {
         c.sheet = mergeSheet(c.sheet);
@@ -228,6 +254,8 @@
     STAT_MIN: STAT_MIN,
     pointsBudget: pointsBudget,
     normalizeTree: normalizeTree,
+    normalizeAbility: normalizeAbility,
+    normalizeClass: normalizeClass,
     normalizeNode: normalizeNode,
     genId: genId,
     load: load,
