@@ -86,21 +86,48 @@
       name: typeof n.name === 'string' ? n.name : '',
       desc: typeof n.desc === 'string' ? n.desc : '',
       tier: Math.max(0, parseInt(n.tier, 10) || 0),
-      parents: Array.isArray(n.parents) ? n.parents.filter(function (p) { return typeof p === 'string'; }) : [],
       cost: Math.max(0, parseInt(n.cost, 10) || 0),
       repeatable: !!n.repeatable,
       maxRank: maxRank,
       unlocked: !!n.unlocked
     };
   }
-  // Normalizza un albero abilità.
+  // Normalizza un collegamento (linea) tra due nodi.
+  // type: 'prereq' = serve aver preso il nodo "from"; 'points' = servono "value" punti spesi nell'albero.
+  function normalizeLink(l) {
+    l = l || {};
+    return {
+      id: l.id || genId(),
+      from: l.from, to: l.to,
+      type: (l.type === 'points') ? 'points' : 'prereq',
+      value: Math.max(0, parseInt(l.value, 10) || 0)
+    };
+  }
+  // Normalizza un albero abilità (+ migrazione vecchi node.parents -> links).
   function normalizeTree(t) {
     t = t || {};
+    var rawNodes = Array.isArray(t.nodes) ? t.nodes : [];
+    var nodes = rawNodes.map(normalizeNode);
+    var ids = {}; nodes.forEach(function (n) { ids[n.id] = true; });
+    var links;
+    if (Array.isArray(t.links)) {
+      links = t.links.map(normalizeLink);
+    } else {
+      // migrazione: ogni parent diventa un link 'prereq'
+      links = [];
+      rawNodes.forEach(function (rn) {
+        if (rn && rn.id && Array.isArray(rn.parents)) {
+          rn.parents.forEach(function (pid) { links.push(normalizeLink({ from: pid, to: rn.id, type: 'prereq' })); });
+        }
+      });
+    }
+    links = links.filter(function (l) { return ids[l.from] && ids[l.to] && l.from !== l.to; });
     return {
       id: t.id || genId(),
       name: typeof t.name === 'string' ? t.name : 'Abilità',
       desc: typeof t.desc === 'string' ? t.desc : '',
-      nodes: Array.isArray(t.nodes) ? t.nodes.map(normalizeNode) : []
+      nodes: nodes,
+      links: links
     };
   }
   // Un'abilità = un albero {id,name,desc,nodes}. Alias semantico di normalizeTree.
@@ -257,6 +284,7 @@
     normalizeAbility: normalizeAbility,
     normalizeClass: normalizeClass,
     normalizeNode: normalizeNode,
+    normalizeLink: normalizeLink,
     genId: genId,
     load: load,
     save: save,

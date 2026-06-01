@@ -27,6 +27,8 @@
   var activeCharId = null;      // PG con cui il giocatore è in sessione (riceve abilità/punti)
   var editingClassId = null;    // classe aperta nell'editor master
   var editingAbilityId = null;  // abilità aperta nell'editor master
+  var linkMode = false;         // editor albero: modalità "collega bolle"
+  var linkFrom = null;          // editor albero: prima bolla selezionata per il collegamento
   var masterProgress = {};      // progressi ricevuti: { memberId: {treeId,ranks,points,charName} }
 
   function showView(name, isBack) {
@@ -810,21 +812,38 @@
     return c.sheet.abilityRanks[treeId];
   }
   function nodeRank(c, treeId, nodeId) { var r = ranksOf(c, treeId)[nodeId]; return r ? parseInt(r, 10) || 0 : 0; }
-  function parentsSatisfied(c, tree, node) {
-    return (node.parents || []).every(function (pid) { return nodeRank(c, tree.id, pid) >= 1; });
+  // Punti spesi DENTRO questo albero (somma costo×rango di ogni nodo preso).
+  function spentInAbility(c, ability) {
+    return (ability.nodes || []).reduce(function (t, n) { return t + n.cost * nodeRank(c, ability.id, n.id); }, 0);
+  }
+  // Collegamenti entranti in un nodo (to === node.id).
+  function incomingLinks(ability, nodeId) {
+    return (ability.links || []).filter(function (l) { return l.to === nodeId; });
+  }
+  // Un link è soddisfatto? prereq: il nodo "from" ha rango ≥1; points: punti spesi ≥ value.
+  function linkSatisfied(c, ability, link) {
+    if (link.type === 'points') return spentInAbility(c, ability) >= link.value;
+    return nodeRank(c, ability.id, link.from) >= 1;
+  }
+  function linksSatisfied(c, ability, nodeId) {
+    return incomingLinks(ability, nodeId).every(function (l) { return linkSatisfied(c, ability, l); });
   }
   // Ritorna { rank, max, taken, locked, parentsOk, affordable, atMax, canTake, reason }
-  function nodeStatus(c, tree, node) {
-    var rank = nodeRank(c, tree.id, node.id);
+  function nodeStatus(c, ability, node) {
+    var rank = nodeRank(c, ability.id, node.id);
     var max = (node.maxRank == null) ? Infinity : node.maxRank;
     var locked = !node.unlocked;
-    var parentsOk = parentsSatisfied(c, tree, node);
+    var parentsOk = linksSatisfied(c, ability, node.id);
     var atMax = rank >= max;
     var affordable = (c.sheet.abilityPoints || 0) >= node.cost;
     var canTake = !locked && parentsOk && !atMax && affordable;
     var reason = '';
     if (locked) reason = 'Bloccata dal Master (per trama)';
-    else if (!parentsOk) reason = 'Richiede prima i nodi precedenti';
+    else if (!parentsOk) {
+      var unmet = incomingLinks(ability, node.id).filter(function (l) { return !linkSatisfied(c, ability, l); })[0];
+      if (unmet && unmet.type === 'points') reason = 'Servono ' + unmet.value + ' punti spesi (ne hai ' + spentInAbility(c, ability) + ')';
+      else reason = 'Richiede prima il nodo collegato';
+    }
     else if (atMax) reason = 'Rango massimo raggiunto';
     else if (!affordable) reason = 'Punti abilità insufficienti';
     return { rank: rank, max: max, taken: rank >= 1, locked: locked, parentsOk: parentsOk,
@@ -984,13 +1003,12 @@
     bits.push('Costo: <b>' + node.cost + '</b> punt' + (node.cost === 1 ? 'o' : 'i'));
     if (node.repeatable) bits.push('Rango: <b>' + st.rank + '/' + (node.maxRank == null ? '∞' : node.maxRank) + '</b>');
     else bits.push(st.taken ? 'Stato: <b>presa</b>' : 'Stato: <b>non presa</b>');
-    if (node.parents && node.parents.length) {
-      var pnames = node.parents.map(function (pid) {
-        var p = (ability.nodes || []).filter(function (x) { return x.id === pid; })[0];
-        return p ? esc(p.name) : '?';
-      }).join(', ');
-      bits.push('Richiede: ' + pnames);
-    }
+    var reqs = incomingLinks(ability, node.id).map(function (l) {
+      if (l.type === 'points') return l.value + ' punti spesi';
+      var p = (ability.nodes || []).filter(function (x) { return x.id === l.from; })[0];
+      return p ? esc(p.name) : '?';
+    });
+    if (reqs.length) bits.push('Richiede: ' + reqs.join(', '));
     info.push('<p class="nd-bits">' + bits.join(' · ') + '</p>');
     if (!readOnly && !st.canTake) info.push('<p class="nd-warn">' + esc(st.reason) + '</p>');
     body.innerHTML = info.join('');
@@ -1005,8 +1023,9 @@
     openModal({ title: node.name || 'Nodo abilità', bodyNode: body, actions: actions });
   }
 
-  // Connettori SVG da orb a orb (posizioni misurate dopo il layout).
-  function drawTreeLinks(canvas, ability, c) {
+  // Connettori SVG seguendo ability.links (posizioni misurate dopo il layout).
+  // linkClick(link) opzionale: rende le linee cliccabili (editor).
+  function drawTreeLinks(canvas, ability, c, linkClick) {
     var svg = canvas.querySelector('.tree-links');
     if (!svg) return;
     var crect = canvas.getBoundingClientRect();
@@ -1022,17 +1041,26 @@
       var r = orb.getBoundingClientRect();
       return { x: r.left - crect.left + r.width / 2, top: r.top - crect.top, bottom: r.top - crect.top + r.height };
     }
-    (ability.nodes || []).forEach(function (node) {
-      (node.parents || []).forEach(function (pid) {
-        var child = anchorOf(node.id);
-        var par = anchorOf(pid);
-        if (!child || !par) return;
-        var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        line.setAttribute('x1', par.x); line.setAttribute('y1', par.bottom);
-        line.setAttribute('x2', child.x); line.setAttribute('y2', child.top);
-        line.setAttribute('class', nodeRank(c, ability.id, pid) >= 1 ? 'lnk on' : 'lnk');
-        svg.appendChild(line);
-      });
+    (ability.links || []).forEach(function (link) {
+      var a = anchorOf(link.from), b = anchorOf(link.to);
+      if (!a || !b) return;
+      var upper = (a.top <= b.top) ? a : b, lower = (a.top <= b.top) ? b : a;
+      var x1 = upper.x, y1 = upper.bottom, x2 = lower.x, y2 = lower.top;
+      var on = linkSatisfied(c, ability, link);
+      var cls = 'lnk' + (on ? ' on' : '') + (link.type === 'points' ? ' points' : '');
+      var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+      line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+      line.setAttribute('class', cls);
+      svg.appendChild(line);
+      if (linkClick) {
+        var hit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        hit.setAttribute('x1', x1); hit.setAttribute('y1', y1);
+        hit.setAttribute('x2', x2); hit.setAttribute('y2', y2);
+        hit.setAttribute('class', 'lnk-hit');
+        hit.addEventListener('click', function (e) { e.stopPropagation(); linkClick(link); });
+        svg.appendChild(hit);
+      }
     });
   }
   function cssEsc(s) { return String(s).replace(/"/g, '\\"'); }
@@ -1043,7 +1071,15 @@
     var cv = $('#ao-scroll .tree-canvas');
     if (cv) drawTreeLinks(cv, ability, c);
   }
-  window.addEventListener('resize', function () { redrawOverlayLinks(); });
+  window.addEventListener('resize', function () { redrawOverlayLinks(); redrawEditorLinks(); });
+
+  function redrawEditorLinks() {
+    if (currentView !== 'ability-editor' || !editingAbilityId) return;
+    var cv = $('#ability-editor-body .tree-canvas'); if (!cv) return;
+    var cls = getClass(editingClassId); if (!cls) return;
+    var ability = getAbilityIn(cls, editingAbilityId); if (!ability) return;
+    drawTreeLinks(cv, ability, { sheet: { abilityRanks: {}, abilityPoints: 0 } }, function (link) { linkDialog(ability, link); });
+  }
 
   $('#ao-close').addEventListener('click', closeAbilityOverlay);
 
@@ -1655,7 +1691,7 @@
       card.innerHTML = '<h4 class="tree-li-name">🌿 ' + esc(ab.name) + '</h4>' +
         '<p class="muted">' + (ab.nodes ? ab.nodes.length : 0) + ' nodi · ' + tgt + '</p>';
       var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;';
-      row.appendChild(btn('Apri albero', 'primary', function () { editingAbilityId = ab.id; renderAbilityEditor(); }));
+      row.appendChild(btn('Apri albero', 'primary', function () { editingAbilityId = ab.id; linkMode = false; linkFrom = null; renderAbilityEditor(); }));
       row.appendChild(btn('Elimina', 'danger', function () {
         confirmDialog('Elimina abilità', 'Eliminare "' + ab.name + '"?', 'Elimina', true).then(function (ok) {
           if (!ok) return; cls.abilities = cls.abilities.filter(function (x) { return x.id !== ab.id; }); persist(); renderAbilityEditor();
@@ -1668,19 +1704,22 @@
 
   function newAbilityDialog(cls) {
     twoFieldDialog('Nuova abilità', 'Nome', 'Es. Via della Lama', 'Descrizione', 'A cosa serve...', function (name, desc) {
-      var ab = Store.normalizeAbility({ name: name, desc: desc, nodes: [] });
-      cls.abilities.unshift(ab); persist(); editingAbilityId = ab.id; renderAbilityEditor();
+      // parte sempre col primo cerchio (radice) = l'abilità stessa, già sbloccato
+      var root = Store.normalizeNode({ name: name || 'Inizio', tier: 0, cost: 0, unlocked: true });
+      var ab = Store.normalizeAbility({ name: name, desc: desc, nodes: [root], links: [] });
+      cls.abilities.unshift(ab); persist();
+      editingAbilityId = ab.id; linkMode = false; linkFrom = null; renderAbilityEditor();
     }, '', '', true);
   }
 
-  // Livello 3 — editor dell'albero di nodi di un'abilità
+  // Livello 3 — editor "a disegno" dell'albero di un'abilità
   function renderNodeEditor(body, cls, ability) {
+    if (!ability.links) ability.links = [];
     var top = document.createElement('div'); top.className = 'panel-card';
     var titleRow = document.createElement('div'); titleRow.style.cssText = 'display:flex;align-items:center;gap:10px;';
     titleRow.innerHTML = '<h3 style="flex:1;margin:0">🌿 ' + esc(ability.name) + '</h3>';
-    titleRow.appendChild(btn('‹ ' + esc(cls.name), '', function () { editingAbilityId = null; renderAbilityEditor(); }));
+    titleRow.appendChild(btn('‹ ' + esc(cls.name), '', function () { editingAbilityId = null; linkMode = false; linkFrom = null; renderAbilityEditor(); }));
     top.appendChild(titleRow);
-    if (ability.desc) { var d = document.createElement('p'); d.className = 'muted'; d.textContent = ability.desc; top.appendChild(d); }
 
     var tf = document.createElement('div'); tf.className = 'field'; tf.style.marginTop = '10px';
     tf.innerHTML = '<label>Destinatario (giocatore connesso)</label>';
@@ -1700,8 +1739,6 @@
 
     var acts = document.createElement('div'); acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;';
     acts.appendChild(btn('📤 Invia al giocatore', 'primary', function () { sendTreeToTarget(ability); }));
-    acts.appendChild(btn('👁 Anteprima albero', '', function () { openAbilityPreview(ability); }));
-    acts.appendChild(btn('＋ Aggiungi nodo', '', function () { nodeDialog(ability, null); }));
     acts.appendChild(btn('🎖 Concedi punti', '', function () { grantPointsDialog(ability.targetMemberId); }));
     top.appendChild(acts);
     body.appendChild(top);
@@ -1715,34 +1752,141 @@
       body.appendChild(prc);
     }
 
-    var listCard = document.createElement('div'); listCard.className = 'panel-card';
-    listCard.innerHTML = '<h4>Nodi (' + ability.nodes.length + ')</h4>';
-    if (ability.nodes.length === 0) listCard.appendChild(emptyHint('Nessun nodo. Aggiungine uno con “Aggiungi nodo”.'));
-    ability.nodes.slice().sort(function (a, b) { return a.tier - b.tier; }).forEach(function (node) {
-      var r = document.createElement('div'); r.className = 'node-row';
-      var pnames = (node.parents || []).map(function (pid) { var p = ability.nodes.filter(function (x) { return x.id === pid; })[0]; return p ? p.name : '?'; }).join(', ');
-      r.innerHTML = '<div class="nr-main"><div class="nr-name">' + esc(node.name || 'Nodo') + '</div>' +
-        '<div class="nr-sub">liv. ' + node.tier + ' · costo ' + node.cost +
-        (node.repeatable ? (' · rip. ×' + (node.maxRank == null ? '∞' : node.maxRank)) : '') +
-        (pnames ? (' · da: ' + esc(pnames)) : '') + '</div></div>';
-      var ctr = document.createElement('div'); ctr.className = 'nr-ctrl';
-      var lockBtn = document.createElement('button');
-      lockBtn.className = 'tool-btn' + (node.unlocked ? ' active' : ''); lockBtn.textContent = node.unlocked ? '🔓' : '🔒';
-      lockBtn.title = node.unlocked ? 'Sbloccato' : 'Bloccato';
-      lockBtn.addEventListener('click', function () { toggleUnlock(ability, node); });
-      var editBtn = document.createElement('button'); editBtn.className = 'icon-btn'; editBtn.textContent = '✎';
-      editBtn.addEventListener('click', function () { nodeDialog(ability, node); });
-      var delBtn = document.createElement('button'); delBtn.className = 'icon-btn'; delBtn.textContent = '×';
-      delBtn.addEventListener('click', function () {
-        ability.nodes = ability.nodes.filter(function (x) { return x.id !== node.id; });
-        ability.nodes.forEach(function (x) { x.parents = (x.parents || []).filter(function (p) { return p !== node.id; }); });
-        persist(); renderAbilityEditor();
-      });
-      ctr.appendChild(lockBtn); ctr.appendChild(editBtn); ctr.appendChild(delBtn);
-      r.appendChild(ctr);
-      listCard.appendChild(r);
+    // barra strumenti di disegno
+    var toolCard = document.createElement('div'); toolCard.className = 'panel-card';
+    var tools = document.createElement('div'); tools.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;align-items:center;';
+    var linkBtn = btn(linkMode ? '🔗 Collega: ON' : '🔗 Collega', linkMode ? 'active' : '', function () {
+      linkMode = !linkMode; linkFrom = null; renderAbilityEditor();
     });
-    body.appendChild(listCard);
+    tools.appendChild(linkBtn);
+    var hint = document.createElement('span'); hint.className = 'muted'; hint.style.fontSize = '.82rem';
+    hint.textContent = linkMode ? 'Tocca due bolle per collegarle (tocca una linea per cambiarne il significato).' : 'Tocca una bolla per modificarla. Usa ＋ per aggiungere bolle.';
+    tools.appendChild(hint);
+    toolCard.appendChild(tools);
+    body.appendChild(toolCard);
+
+    // la tela dell'albero (editabile)
+    var treeCard = document.createElement('div'); treeCard.className = 'panel-card editor-tree-card';
+    treeCard.appendChild(buildEditorCanvas(ability));
+    body.appendChild(treeCard);
+  }
+
+  function buildEditorCanvas(ability) {
+    var canvas = document.createElement('div'); canvas.className = 'tree-canvas';
+    canvas.setAttribute('data-tree', ability.id);
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'tree-links'); canvas.appendChild(svg);
+    var tiersWrap = document.createElement('div'); tiersWrap.className = 'tree-tiers'; canvas.appendChild(tiersWrap);
+
+    var byTier = {};
+    (ability.nodes || []).forEach(function (n) { (byTier[n.tier] = byTier[n.tier] || []).push(n); });
+    var maxTier = 0;
+    Object.keys(byTier).forEach(function (t) { maxTier = Math.max(maxTier, Number(t)); });
+
+    for (var t = 0; t <= maxTier; t++) {
+      (function (tier) {
+        var row = document.createElement('div'); row.className = 'tree-tier';
+        (byTier[tier] || []).forEach(function (node) { row.appendChild(editorOrb(ability, node)); });
+        if (tier >= 1) row.appendChild(addChip(function () { addNodeToTier(ability, tier); }, '＋'));
+        tiersWrap.appendChild(row);
+      })(t);
+    }
+    // riga "nuovo livello" sotto: creare qui sblocca la profondità successiva
+    var nextRow = document.createElement('div'); nextRow.className = 'tree-tier next-level';
+    nextRow.appendChild(addChip(function () { addNodeToTier(ability, maxTier + 1); }, '＋ livello ' + (maxTier + 1)));
+    tiersWrap.appendChild(nextRow);
+
+    (function attempt(tries) {
+      if (canvas.getBoundingClientRect().width > 0) {
+        var c = { sheet: { abilityRanks: {}, abilityPoints: 0 } }; // editor: nessun progresso, mostra struttura
+        drawTreeLinks(canvas, ability, c, function (link) { linkDialog(ability, link); });
+        return;
+      }
+      if (tries < 40) requestAnimationFrame(function () { attempt(tries + 1); });
+    })(0);
+    return canvas;
+  }
+
+  function addChip(onClick, label) {
+    var b = document.createElement('button'); b.className = 'add-chip'; b.textContent = label || '＋';
+    b.addEventListener('click', function (e) { e.stopPropagation(); onClick(); });
+    return b;
+  }
+
+  function editorOrb(ability, node) {
+    var el = document.createElement('button');
+    el.className = 'ability-node editor-node' + (node.unlocked ? '' : ' locked') + (linkFrom === node.id ? ' linking' : '');
+    el.setAttribute('data-node', node.id);
+    var rankInfo = node.repeatable ? ('×' + (node.maxRank == null ? '∞' : node.maxRank)) : '';
+    el.innerHTML =
+      '<span class="nd-orb"><span class="nd-ico">' + (node.unlocked ? '✦' : '🔒') + '</span></span>' +
+      '<span class="nd-name">' + esc(node.name || 'Nodo') + '</span>' +
+      '<span class="nd-cost">' + node.cost + ' pt' + (rankInfo ? (' · ' + rankInfo) : '') + '</span>';
+    el.addEventListener('click', function () { onEditorNodeClick(ability, node); });
+    return el;
+  }
+
+  function onEditorNodeClick(ability, node) {
+    if (linkMode) {
+      if (!linkFrom) { linkFrom = node.id; renderAbilityEditor(); toast('Ora tocca la bolla da collegare'); return; }
+      if (linkFrom === node.id) { linkFrom = null; renderAbilityEditor(); return; }
+      createLink(ability, linkFrom, node.id); linkFrom = null; renderAbilityEditor();
+    } else {
+      editNodeDialog(ability, node);
+    }
+  }
+
+  function createLink(ability, aId, bId) {
+    var na = ability.nodes.filter(function (x) { return x.id === aId; })[0];
+    var nb = ability.nodes.filter(function (x) { return x.id === bId; })[0];
+    if (!na || !nb) return;
+    var from = aId, to = bId;
+    if (na.tier > nb.tier) { from = bId; to = aId; } // la radice/sopra è il prerequisito
+    if (from === to) return;
+    if ((ability.links || []).some(function (l) { return l.from === from && l.to === to; })) { toast('Collegamento già presente'); return; }
+    ability.links.push(Store.normalizeLink({ from: from, to: to, type: 'prereq' }));
+    persist();
+    toast('Collegamento creato');
+  }
+
+  function linkDialog(ability, link) {
+    var fromN = ability.nodes.filter(function (x) { return x.id === link.from; })[0] || {};
+    var toN = ability.nodes.filter(function (x) { return x.id === link.to; })[0] || {};
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    wrap.innerHTML =
+      '<p class="muted">Da <b>' + esc(fromN.name || '?') + '</b> a <b>' + esc(toN.name || '?') + '</b></p>' +
+      '<label class="chk"><input type="radio" name="lt" value="prereq" /> Prerequisito: serve aver preso la bolla precedente</label>' +
+      '<label class="chk"><input type="radio" name="lt" value="points" /> Soglia: servono <b>punti spesi</b> nell’albero</label>' +
+      '<div class="field" id="lt-valwrap"><label>Punti spesi richiesti</label><input id="lt-val" type="number" inputmode="numeric" min="1" /></div>';
+    wrap.querySelector('input[value="' + (link.type === 'points' ? 'points' : 'prereq') + '"]').checked = true;
+    var valWrap = wrap.querySelector('#lt-valwrap'); var valInput = wrap.querySelector('#lt-val');
+    valInput.value = link.value || 1;
+    function syncVal() { valWrap.style.display = (wrap.querySelector('input[name="lt"]:checked').value === 'points') ? '' : 'none'; }
+    Array.prototype.forEach.call(wrap.querySelectorAll('input[name="lt"]'), function (r) { r.addEventListener('change', syncVal); });
+    syncVal();
+    function save() {
+      var type = wrap.querySelector('input[name="lt"]:checked').value;
+      link.type = type;
+      link.value = (type === 'points') ? Math.max(1, parseInt(valInput.value, 10) || 1) : 0;
+      persist(); closeModal(); renderAbilityEditor();
+    }
+    openModal({
+      title: 'Significato del collegamento', bodyNode: wrap,
+      actions: [
+        { label: 'Elimina', cls: 'danger', onClick: function () {
+            ability.links = ability.links.filter(function (l) { return l.id !== link.id; }); persist(); closeModal(); renderAbilityEditor();
+          } },
+        { label: 'Annulla', onClick: closeModal },
+        { label: 'Salva', cls: 'primary', onClick: save }
+      ]
+    });
+  }
+
+  function addNodeToTier(ability, tier) {
+    var node = Store.normalizeNode({ name: 'Nuova passiva', tier: tier, cost: 1, unlocked: false });
+    ability.nodes.push(node); persist();
+    renderAbilityEditor();
+    editNodeDialog(ability, node); // apri subito per configurarla
   }
 
   function sendTreeToTarget(ability) {
@@ -1767,59 +1911,53 @@
     });
   }
 
-  function nodeDialog(ability, node) {
-    var editing = !!node;
+  function editNodeDialog(ability, node) {
     var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
     wrap.innerHTML =
       '<div class="field"><label>Nome</label><input id="nd-name" maxlength="40" /></div>' +
       '<div class="field"><label>Descrizione</label><textarea id="nd-desc" rows="3" maxlength="500"></textarea></div>' +
-      '<div class="field-row">' +
-        '<div class="field"><label>Livello (riga)</label><input id="nd-tier" type="number" inputmode="numeric" min="0" /></div>' +
-        '<div class="field"><label>Costo punti</label><input id="nd-cost" type="number" inputmode="numeric" min="0" /></div>' +
-      '</div>' +
+      '<div class="field"><label>Costo punti</label><input id="nd-cost" type="number" inputmode="numeric" min="0" /></div>' +
       '<label class="chk"><input type="checkbox" id="nd-rep" /> Ripetibile (più ranghi)</label>' +
       '<div class="field" id="nd-maxwrap"><label>Rango massimo (vuoto = infinito)</label><input id="nd-max" type="number" inputmode="numeric" min="1" /></div>' +
-      '<div class="field"><label>Prerequisiti (nodi genitori)</label><div id="nd-parents" class="parents-pick"></div></div>' +
-      '<label class="chk"><input type="checkbox" id="nd-unlock" /> Già sbloccato (disponibile subito)</label>';
-    var nm = wrap.querySelector('#nd-name'), ds = wrap.querySelector('#nd-desc'), tr = wrap.querySelector('#nd-tier'),
-        co = wrap.querySelector('#nd-cost'), rp = wrap.querySelector('#nd-rep'), mx = wrap.querySelector('#nd-max'),
-        ul = wrap.querySelector('#nd-unlock'), pp = wrap.querySelector('#nd-parents'), mw = wrap.querySelector('#nd-maxwrap');
-    nm.value = node ? node.name : '';
-    ds.value = node ? node.desc : '';
-    tr.value = node ? node.tier : 0;
-    co.value = node ? node.cost : 1;
-    rp.checked = node ? node.repeatable : false;
-    ul.checked = node ? node.unlocked : false;
-    mx.value = (node && node.maxRank != null) ? node.maxRank : '';
+      '<label class="chk"><input type="checkbox" id="nd-unlock" /> Sbloccato (disponibile per il giocatore)</label>';
+    var nm = wrap.querySelector('#nd-name'), ds = wrap.querySelector('#nd-desc'),
+        co = wrap.querySelector('#nd-cost'), rp = wrap.querySelector('#nd-rep'),
+        mx = wrap.querySelector('#nd-max'), ul = wrap.querySelector('#nd-unlock'), mw = wrap.querySelector('#nd-maxwrap');
+    nm.value = node.name || '';
+    ds.value = node.desc || '';
+    co.value = node.cost;
+    rp.checked = node.repeatable;
+    ul.checked = node.unlocked;
+    mx.value = (node.maxRank != null) ? node.maxRank : '';
     function syncMax() { mw.style.display = rp.checked ? '' : 'none'; }
     rp.addEventListener('change', syncMax); syncMax();
-    var others = ability.nodes.filter(function (x) { return !node || x.id !== node.id; });
-    if (others.length === 0) { pp.innerHTML = '<span class="muted">Nessun altro nodo disponibile</span>'; }
-    others.forEach(function (x) {
-      var lab = document.createElement('label'); lab.className = 'chk';
-      var ck = document.createElement('input'); ck.type = 'checkbox'; ck.value = x.id;
-      if (node && (node.parents || []).indexOf(x.id) >= 0) ck.checked = true;
-      lab.appendChild(ck);
-      lab.appendChild(document.createTextNode(' ' + (x.name || 'Nodo') + ' (liv.' + x.tier + ')'));
-      pp.appendChild(lab);
-    });
     function save() {
       var name = nm.value.trim(); if (!name) { nm.focus(); return; }
-      var parents = Array.prototype.slice.call(pp.querySelectorAll('input:checked')).map(function (i) { return i.value; });
-      var data = {
-        id: node ? node.id : undefined, name: name, desc: ds.value.trim(),
-        tier: parseInt(tr.value, 10) || 0, cost: parseInt(co.value, 10) || 0,
-        repeatable: rp.checked, maxRank: rp.checked ? (mx.value === '' ? null : (parseInt(mx.value, 10) || 1)) : 1,
-        unlocked: ul.checked, parents: parents
-      };
-      var nn = Store.normalizeNode(data);
-      if (node) { var i = ability.nodes.map(function (x) { return x.id; }).indexOf(node.id); ability.nodes[i] = nn; }
-      else ability.nodes.push(nn);
+      var wasUnlocked = node.unlocked;
+      node.name = name;
+      node.desc = ds.value.trim();
+      node.cost = Math.max(0, parseInt(co.value, 10) || 0);
+      node.repeatable = rp.checked;
+      node.maxRank = rp.checked ? (mx.value === '' ? null : Math.max(1, parseInt(mx.value, 10) || 1)) : 1;
+      node.unlocked = ul.checked;
+      persist(); closeModal(); renderAbilityEditor();
+      // sblocco "per trama" live, se il giocatore è collegato
+      if (node.unlocked !== wasUnlocked && ability.targetMemberId && typeof Net !== 'undefined' && Net.status().connected) {
+        Net.unlockNode(ability.targetMemberId, ability.id, node.id, node.unlocked);
+      }
+    }
+    function del() {
+      ability.nodes = ability.nodes.filter(function (x) { return x.id !== node.id; });
+      ability.links = (ability.links || []).filter(function (l) { return l.from !== node.id && l.to !== node.id; });
       persist(); closeModal(); renderAbilityEditor();
     }
     openModal({
-      title: editing ? 'Modifica nodo' : 'Nuovo nodo', bodyNode: wrap, focus: '#nd-name',
-      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }]
+      title: 'Modifica bolla', bodyNode: wrap, focus: '#nd-name',
+      actions: [
+        { label: 'Elimina', cls: 'danger', onClick: del },
+        { label: 'Annulla', onClick: closeModal },
+        { label: 'Salva', cls: 'primary', onClick: save }
+      ]
     });
   }
 
