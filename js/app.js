@@ -595,6 +595,8 @@
   $('#drawer-nav').addEventListener('click', function (e) {
     var it = e.target.closest('.drawer-item');
     if (!it) return;
+    var nav = it.getAttribute('data-nav');
+    if (nav) { closeDrawer(); if (typeof navTo === 'function') navTo(nav); return; }
     setSheetSection(it.getAttribute('data-section'));
     closeDrawer();
   });
@@ -1350,18 +1352,24 @@
   }
 
   /* ---- Notifiche non lette (pallino + breve evidenza) ---- */
+  function setUnreadDot(el) {
+    if (!el) return;
+    var d = el.querySelector('.unread-dot');
+    if (unread > 0) {
+      if (!d) { d = document.createElement('span'); d.className = 'unread-dot'; el.appendChild(d); }
+      d.textContent = unread > 9 ? '9+' : unread;
+    } else if (d) { d.remove(); }
+  }
   function refreshUnreadUI() {
-    $all('.nav-burger').forEach(function (b) {
-      var d = b.querySelector('.unread-dot');
-      if (unread > 0) {
-        if (!d) { d = document.createElement('span'); d.className = 'unread-dot'; b.appendChild(d); }
-        d.textContent = unread > 9 ? '9+' : unread;
-      } else if (d) { d.remove(); }
-    });
+    $all('.nav-burger').forEach(setUnreadDot);
+    setUnreadDot($('#sheet-menu-btn'));               // hamburger della scheda
+    setUnreadDot($('#drawer-nav [data-nav="messages"]')); // voce Messaggi nel menu scheda
   }
   function clearUnread() { unread = 0; refreshUnreadUI(); }
   function flashBurger() {
-    $all('.nav-burger').forEach(function (b) {
+    var els = $all('.nav-burger');
+    var sm = $('#sheet-menu-btn'); if (sm) els.push(sm);
+    els.forEach(function (b) {
       b.classList.remove('glow'); void b.offsetWidth; b.classList.add('glow');
       setTimeout(function () { b.classList.remove('glow'); }, 2400);
     });
@@ -1456,20 +1464,26 @@
     var on = st.connected;
 
     var card = document.createElement('div'); card.className = 'panel-card';
-    card.innerHTML = '<h3>Sessione</h3>';
-    var pill = document.createElement('span');
-    pill.className = 'status-pill ' + (on ? 'on' : (st.state === 'connecting' ? 'busy' : ''));
-    pill.innerHTML = '<span class="dot"></span>' +
-      (on ? ('Attiva · codice ' + esc(st.code || '')) : (st.state === 'connecting' ? 'Avvio in corso…' : 'Non avviata'));
-    card.appendChild(pill);
     var acts = document.createElement('div');
     acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;';
     if (on) {
+      card.innerHTML = '<h3>Partita in corso</h3>' +
+        '<div class="code-display"><div class="code">' + esc(st.code || '') + '</div>' +
+        '<div class="code-hint">I giocatori entrano con questo codice (stessa rete o hotspot)</div></div>';
       acts.appendChild(btn('🖼️ Mostra immagine', 'primary', pickBroadcastImage));
-      acts.appendChild(btn('🔗 Gestisci sessione', '', function () { navTo('session'); }));
       acts.appendChild(btn('💬 Messaggi', '', function () { navTo('messages'); }));
+      acts.appendChild(btn('🔗 Gestisci', '', function () { navTo('session'); }));
+      acts.appendChild(btn('Termina', 'danger', function () { Net.leave(); }));
+    } else if (st.state === 'connecting') {
+      card.innerHTML = '<h3>Avvio della partita…</h3><p class="muted">Creazione della sessione in corso…</p>';
     } else {
-      acts.appendChild(btn('⚔️ Avvia sessione', 'primary', function () { navTo('session'); }));
+      card.innerHTML = '<h3>Avvia la partita</h3><p class="muted">Crea la sessione: otterrai un <b>codice</b> da dare ai giocatori per farli entrare. Dovete essere sulla stessa rete o hotspot.</p>';
+      var startBtn = btn('⚔️ Avvia partita', 'primary big', function () {
+        if (typeof Net === 'undefined' || !Net.available()) { toast('Serve la connessione a internet', 'err'); return; }
+        var n = netName('Master'); saveNetName(n); Net.host(n);
+      });
+      startBtn.style.marginTop = '12px';
+      acts.appendChild(startBtn);
     }
     card.appendChild(acts);
     body.appendChild(card);
@@ -1496,13 +1510,22 @@
   function membersCard(st) {
     var c = document.createElement('div'); c.className = 'panel-card';
     var members = st.members || [];
-    c.innerHTML = '<h3>Collegati (' + members.length + ')</h3>';
+    var players = members.filter(function (m) { return m.role === 'player'; });
+    c.innerHTML = '<h3>Giocatori collegati (' + players.length + ')</h3>';
     var list = document.createElement('div'); list.className = 'member-list';
     members.forEach(function (m) {
       var row = document.createElement('div'); row.className = 'member' + (m.role === 'master' ? ' is-master' : '');
+      var mine = (m.id === st.myId) ? ' (tu)' : '';
+      var mainName, sub;
+      if (m.role === 'master') {
+        mainName = esc(m.name) + mine; sub = '';
+      } else {
+        mainName = m.charName ? (esc(m.charName) + mine) : ('<span class="m-nochar">personaggio non scelto' + mine + '</span>');
+        sub = m.charName ? esc(m.name) : '';
+      }
       row.innerHTML =
         '<span class="m-ico">' + (m.role === 'master' ? '📜' : '⚔️') + '</span>' +
-        '<span class="m-name">' + esc(m.name) + (m.charName ? (' · ' + esc(m.charName)) : '') + (m.id === st.myId ? ' (tu)' : '') + '</span>' +
+        '<span class="m-name">' + mainName + (sub ? ('<span class="m-sub"> · ' + sub + '</span>') : '') + '</span>' +
         '<span class="m-role">' + (m.role === 'master' ? 'Master' : 'Player') + '</span>';
       if (st.role === 'master' && m.role === 'player') {
         var gb = document.createElement('button'); gb.className = 'tool-btn member-pts'; gb.textContent = '＋ punti';
@@ -1512,7 +1535,7 @@
       list.appendChild(row);
     });
     c.appendChild(list);
-    if (members.length <= 1 && st.role === 'master') {
+    if (players.length === 0 && st.role === 'master') {
       var p = document.createElement('p'); p.className = 'muted'; p.style.marginTop = '8px';
       p.textContent = 'In attesa che i giocatori inseriscano il codice…';
       c.appendChild(p);
