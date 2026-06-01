@@ -1245,11 +1245,13 @@
         confirmDialog('Importa backup', 'Vuoi SOSTITUIRE tutti i dati attuali con quelli del backup? I dati attuali andranno persi.', 'Sostituisci', true)
           .then(function (ok) {
             if (!ok) return;
+            var master = data.data.master || {};
+            master.classes = Array.isArray(master.classes) ? master.classes.map(Store.normalizeClass) : [];
             state = {
               version: Store.VERSION,
               characters: (data.data.characters || []).map(function (c) { c.sheet = Store.mergeSheet(c.sheet); return c; }),
               folders: data.data.folders || [],
-              master: data.data.master || {}
+              master: master
             };
             persist(); currentFolderId = null; renderPlayer();
             toast('Backup importato', 'ok');
