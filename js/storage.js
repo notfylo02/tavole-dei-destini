@@ -89,7 +89,7 @@
       cost: Math.max(0, parseInt(n.cost, 10) || 0),
       repeatable: !!n.repeatable,
       maxRank: maxRank,
-      unlocked: !!n.unlocked
+      unlocked: n.unlocked !== false // le passive sono sempre disponibili di default
     };
   }
   // Normalizza un collegamento (linea) tra due nodi.

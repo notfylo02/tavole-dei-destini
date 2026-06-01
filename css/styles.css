@@ -86,6 +86,12 @@ body {
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .head-spacer { width: 44px; }
+.to-menu { flex: none; height: 44px; padding: 0 14px; border-radius: 13px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text-dim);
+  font-family: inherit; font-size: .9rem; font-weight: 600; white-space: nowrap;
+  transition: background .25s, color .25s, border-color .25s, transform .12s var(--ease-back); }
+.to-menu:hover { color: var(--text); border-color: var(--line-strong); background: var(--surface-2); }
+.to-menu:active { transform: scale(.94); }
 
 .icon-btn {
   width: 44px; height: 44px; flex: none; border-radius: 13px;
@@ -468,7 +474,7 @@ body {
 /* ============================================================
    Modale
    ============================================================ */
-.modal-overlay { position: fixed; inset: 0; z-index: 50; display: none; place-items: center; padding: 20px;
+.modal-overlay { position: fixed; inset: 0; z-index: 130; display: none; place-items: center; padding: 20px;
   background: rgba(4,3,10,.7); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   animation: fade .25s ease both; }
 .modal-overlay:not([hidden]) { display: grid; }

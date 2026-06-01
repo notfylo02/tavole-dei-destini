@@ -834,21 +834,19 @@
   function nodeStatus(c, ability, node) {
     var rank = nodeRank(c, ability.id, node.id);
     var max = (node.maxRank == null) ? Infinity : node.maxRank;
-    var locked = !node.unlocked;
     var parentsOk = linksSatisfied(c, ability, node.id);
     var atMax = rank >= max;
     var affordable = (c.sheet.abilityPoints || 0) >= node.cost;
-    var canTake = !locked && parentsOk && !atMax && affordable;
+    var canTake = parentsOk && !atMax && affordable;
     var reason = '';
-    if (locked) reason = 'Bloccata dal Master (per trama)';
-    else if (!parentsOk) {
+    if (!parentsOk) {
       var unmet = incomingLinks(ability, node.id).filter(function (l) { return !linkSatisfied(c, ability, l); })[0];
       if (unmet && unmet.type === 'points') reason = 'Servono ' + unmet.value + ' punti spesi (ne hai ' + spentInAbility(c, ability) + ')';
       else reason = 'Richiede prima il nodo collegato';
     }
     else if (atMax) reason = 'Rango massimo raggiunto';
     else if (!affordable) reason = 'Punti abilità insufficienti';
-    return { rank: rank, max: max, taken: rank >= 1, locked: locked, parentsOk: parentsOk,
+    return { rank: rank, max: max, taken: rank >= 1, locked: false, parentsOk: parentsOk,
       atMax: atMax, affordable: affordable, canTake: canTake, reason: reason };
   }
   function takeNode(c, tree, node) {
@@ -1262,6 +1260,10 @@
      ============================================================ */
   $all('[data-back]').forEach(function (b) {
     b.addEventListener('click', function () { playerMode = null; back(); });
+  });
+  // "Torna al menu": dalle pagine principali (player/master) torna alla scelta ruolo
+  $all('[data-tomenu]').forEach(function (b) {
+    b.addEventListener('click', function () { playerMode = null; navStack = []; showView('choice'); });
   });
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
@@ -1756,6 +1758,7 @@
       ability.targetMemberId = this.value || null;
       var m = netMembers.filter(function (x) { return x.id === ability.targetMemberId; })[0];
       ability.targetName = m ? (m.charName || m.name) : ''; persist();
+      syncAbility(ability); // invia subito l'abilità corrente al nuovo destinatario
     });
     tf.appendChild(sel);
     top.appendChild(tf);
@@ -1838,11 +1841,11 @@
 
   function editorOrb(ability, node) {
     var el = document.createElement('button');
-    el.className = 'ability-node editor-node' + (node.unlocked ? '' : ' locked') + (linkFrom === node.id ? ' linking' : '');
+    el.className = 'ability-node editor-node' + (linkFrom === node.id ? ' linking' : '');
     el.setAttribute('data-node', node.id);
     var rankInfo = node.repeatable ? ('×' + (node.maxRank == null ? '∞' : node.maxRank)) : '';
     el.innerHTML =
-      '<span class="nd-orb"><span class="nd-ico">' + (node.unlocked ? '✦' : '🔒') + '</span></span>' +
+      '<span class="nd-orb"><span class="nd-ico">✦</span></span>' +
       '<span class="nd-name">' + esc(node.name || 'Nodo') + '</span>' +
       '<span class="nd-cost">' + node.cost + ' pt' + (rankInfo ? (' · ' + rankInfo) : '') + '</span>';
     el.addEventListener('click', function () { onEditorNodeClick(ability, node); });
@@ -1868,8 +1871,18 @@
     if (from === to) return;
     if ((ability.links || []).some(function (l) { return l.from === from && l.to === to; })) { toast('Collegamento già presente'); return; }
     ability.links.push(Store.normalizeLink({ from: from, to: to, type: 'prereq' }));
-    persist();
+    persist(); syncAbility(ability);
     toast('Collegamento creato');
+  }
+
+  // costruisce la copia da inviare (con i collegamenti) e la sincronizza live al giocatore
+  function abilityForSend(ability) {
+    return Store.normalizeAbility({ id: ability.id, name: ability.name, desc: ability.desc, nodes: ability.nodes, links: ability.links });
+  }
+  function syncAbility(ability) {
+    if (ability && ability.targetMemberId && typeof Net !== 'undefined' && Net.status().connected) {
+      Net.pushTree(ability.targetMemberId, abilityForSend(ability));
+    }
   }
 
   function linkDialog(ability, link) {
@@ -1891,13 +1904,13 @@
       var type = wrap.querySelector('input[name="lt"]:checked').value;
       link.type = type;
       link.value = (type === 'points') ? Math.max(1, parseInt(valInput.value, 10) || 1) : 0;
-      persist(); closeModal(); renderAbilityEditor();
+      persist(); syncAbility(ability); closeModal(); renderAbilityEditor();
     }
     openModal({
       title: 'Significato del collegamento', bodyNode: wrap,
       actions: [
         { label: 'Elimina', cls: 'danger', onClick: function () {
-            ability.links = ability.links.filter(function (l) { return l.id !== link.id; }); persist(); closeModal(); renderAbilityEditor();
+            ability.links = ability.links.filter(function (l) { return l.id !== link.id; }); persist(); syncAbility(ability); closeModal(); renderAbilityEditor();
           } },
         { label: 'Annulla', onClick: closeModal },
         { label: 'Salva', cls: 'primary', onClick: save }
@@ -1906,23 +1919,26 @@
   }
 
   function addNodeToTier(ability, tier) {
-    var node = Store.normalizeNode({ name: 'Nuova passiva', tier: tier, cost: 1, unlocked: false });
-    ability.nodes.push(node); persist();
-    renderAbilityEditor();
+    var node = Store.normalizeNode({ name: 'Nuova passiva', tier: tier, cost: 1, unlocked: true });
+    ability.nodes.push(node);
+    // auto-collegamento "logico" al piano superiore più vicino che ha nodi
+    if (tier >= 1) {
+      var upper = null;
+      for (var t = tier - 1; t >= 0 && !upper; t--) {
+        var inT = ability.nodes.filter(function (n) { return n.tier === t; });
+        if (inT.length) upper = inT[inT.length - 1];
+      }
+      if (upper) ability.links.push(Store.normalizeLink({ from: upper.id, to: node.id, type: 'prereq' }));
+    }
+    persist(); renderAbilityEditor(); syncAbility(ability);
     editNodeDialog(ability, node); // apri subito per configurarla
   }
 
   function sendTreeToTarget(ability) {
     if (!ability.targetMemberId) { toast('Scegli un destinatario', 'err'); return; }
     if (typeof Net === 'undefined' || !Net.status().connected) { toast('Avvia prima la sessione', 'err'); return; }
-    var ok = Net.pushTree(ability.targetMemberId, Store.normalizeAbility({ id: ability.id, name: ability.name, desc: ability.desc, nodes: ability.nodes }));
+    var ok = Net.pushTree(ability.targetMemberId, abilityForSend(ability));
     toast(ok ? ('Abilità inviata a ' + (ability.targetName || 'giocatore')) : 'Giocatore non collegato', ok ? 'ok' : 'err');
-  }
-  function toggleUnlock(ability, node) {
-    node.unlocked = !node.unlocked; persist(); renderAbilityEditor();
-    if (ability.targetMemberId && typeof Net !== 'undefined' && Net.status().connected) {
-      Net.unlockNode(ability.targetMemberId, ability.id, node.id, node.unlocked);
-    }
   }
   function grantPointsDialog(memberId) {
     if (!memberId) { toast('Scegli prima un destinatario', 'err'); return; }
@@ -1941,38 +1957,31 @@
       '<div class="field"><label>Descrizione</label><textarea id="nd-desc" rows="3" maxlength="500"></textarea></div>' +
       '<div class="field"><label>Costo punti</label><input id="nd-cost" type="number" inputmode="numeric" min="0" /></div>' +
       '<label class="chk"><input type="checkbox" id="nd-rep" /> Ripetibile (più ranghi)</label>' +
-      '<div class="field" id="nd-maxwrap"><label>Rango massimo (vuoto = infinito)</label><input id="nd-max" type="number" inputmode="numeric" min="1" /></div>' +
-      '<label class="chk"><input type="checkbox" id="nd-unlock" /> Sbloccato (disponibile per il giocatore)</label>';
+      '<div class="field" id="nd-maxwrap"><label>Rango massimo (vuoto = infinito)</label><input id="nd-max" type="number" inputmode="numeric" min="1" /></div>';
     var nm = wrap.querySelector('#nd-name'), ds = wrap.querySelector('#nd-desc'),
         co = wrap.querySelector('#nd-cost'), rp = wrap.querySelector('#nd-rep'),
-        mx = wrap.querySelector('#nd-max'), ul = wrap.querySelector('#nd-unlock'), mw = wrap.querySelector('#nd-maxwrap');
+        mx = wrap.querySelector('#nd-max'), mw = wrap.querySelector('#nd-maxwrap');
     nm.value = node.name || '';
     ds.value = node.desc || '';
     co.value = node.cost;
     rp.checked = node.repeatable;
-    ul.checked = node.unlocked;
     mx.value = (node.maxRank != null) ? node.maxRank : '';
     function syncMax() { mw.style.display = rp.checked ? '' : 'none'; }
     rp.addEventListener('change', syncMax); syncMax();
     function save() {
       var name = nm.value.trim(); if (!name) { nm.focus(); return; }
-      var wasUnlocked = node.unlocked;
       node.name = name;
       node.desc = ds.value.trim();
       node.cost = Math.max(0, parseInt(co.value, 10) || 0);
       node.repeatable = rp.checked;
       node.maxRank = rp.checked ? (mx.value === '' ? null : Math.max(1, parseInt(mx.value, 10) || 1)) : 1;
-      node.unlocked = ul.checked;
-      persist(); closeModal(); renderAbilityEditor();
-      // sblocco "per trama" live, se il giocatore è collegato
-      if (node.unlocked !== wasUnlocked && ability.targetMemberId && typeof Net !== 'undefined' && Net.status().connected) {
-        Net.unlockNode(ability.targetMemberId, ability.id, node.id, node.unlocked);
-      }
+      node.unlocked = true;
+      persist(); syncAbility(ability); closeModal(); renderAbilityEditor();
     }
     function del() {
       ability.nodes = ability.nodes.filter(function (x) { return x.id !== node.id; });
       ability.links = (ability.links || []).filter(function (l) { return l.from !== node.id && l.to !== node.id; });
-      persist(); closeModal(); renderAbilityEditor();
+      persist(); syncAbility(ability); closeModal(); renderAbilityEditor();
     }
     openModal({
       title: 'Modifica bolla', bodyNode: wrap, focus: '#nd-name',
