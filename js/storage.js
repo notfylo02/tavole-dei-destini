@@ -50,7 +50,7 @@
 
   // Sistema punti statistiche
   var BASE_POINTS = 10;     // punti iniziali (livello 1)
-  var POINTS_PER_LEVEL = 4; // punti guadagnati per ogni livello dopo il 1°
+  var POINTS_PER_LEVEL = 3; // punti guadagnati per ogni livello dopo il 1°
   var STAT_MIN = -5;        // valore minimo per statistica
 
   function pointsBudget(level) {
