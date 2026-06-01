@@ -24,6 +24,9 @@
   var currentCharId = null;
   var currentSection = 'statistiche';
   var appRole = 'player';       // 'master' | 'player' — ruolo corrente (per menu e sessione)
+  var activeCharId = null;      // PG con cui il giocatore è in sessione (riceve abilità/punti)
+  var editingTreeId = null;     // albero abilità aperto nell'editor master
+  var masterProgress = {};      // progressi ricevuti: { memberId: {treeId,ranks,points,charName} }
 
   function showView(name, isBack) {
     var next = document.getElementById('view-' + name);
@@ -60,6 +63,7 @@
     if (name === 'master') { renderMaster(); }
     if (name === 'session') { renderSession(); }
     if (name === 'messages') { renderMessages(); clearUnread(); }
+    if (name === 'ability-editor') { renderAbilityEditor(); }
   }
 
   /* ============================================================
@@ -601,7 +605,7 @@
 
     switch (currentSection) {
       case 'statistiche': panel.innerHTML = ''; panel.appendChild(viewStatistiche(c)); break;
-      case 'abilita': panel.innerHTML = ''; panel.appendChild(viewList(c, 'abilita', 'Abilità', '✨', 'Nuova abilità')); break;
+      case 'abilita': panel.innerHTML = ''; panel.appendChild(viewAbilita(c)); break;
       case 'armamenti': panel.innerHTML = ''; panel.appendChild(viewList(c, 'armamenti', 'Armamenti', '🗡️', 'Nuovo armamento')); break;
       case 'zaino': panel.innerHTML = ''; panel.appendChild(viewZaino(c)); break;
       case 'combattimento': panel.innerHTML = ''; panel.appendChild(viewCombattimento(c)); break;
@@ -794,6 +798,194 @@
       actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }]
     });
   }
+
+  /* ============================================================
+     ABILITÀ — alberi a punti (create/sbloccate dal Master)
+     ============================================================ */
+  function ranksOf(c, treeId) {
+    if (!c.sheet.abilityRanks) c.sheet.abilityRanks = {};
+    if (!c.sheet.abilityRanks[treeId]) c.sheet.abilityRanks[treeId] = {};
+    return c.sheet.abilityRanks[treeId];
+  }
+  function nodeRank(c, treeId, nodeId) { var r = ranksOf(c, treeId)[nodeId]; return r ? parseInt(r, 10) || 0 : 0; }
+  function parentsSatisfied(c, tree, node) {
+    return (node.parents || []).every(function (pid) { return nodeRank(c, tree.id, pid) >= 1; });
+  }
+  // Ritorna { rank, max, taken, locked, parentsOk, affordable, atMax, canTake, reason }
+  function nodeStatus(c, tree, node) {
+    var rank = nodeRank(c, tree.id, node.id);
+    var max = (node.maxRank == null) ? Infinity : node.maxRank;
+    var locked = !node.unlocked;
+    var parentsOk = parentsSatisfied(c, tree, node);
+    var atMax = rank >= max;
+    var affordable = (c.sheet.abilityPoints || 0) >= node.cost;
+    var canTake = !locked && parentsOk && !atMax && affordable;
+    var reason = '';
+    if (locked) reason = 'Bloccata dal Master (per trama)';
+    else if (!parentsOk) reason = 'Richiede prima i nodi precedenti';
+    else if (atMax) reason = 'Rango massimo raggiunto';
+    else if (!affordable) reason = 'Punti abilità insufficienti';
+    return { rank: rank, max: max, taken: rank >= 1, locked: locked, parentsOk: parentsOk,
+      atMax: atMax, affordable: affordable, canTake: canTake, reason: reason };
+  }
+  function takeNode(c, tree, node) {
+    var st = nodeStatus(c, tree, node);
+    if (!st.canTake) { toast(st.reason || 'Non disponibile', 'err'); return false; }
+    c.sheet.abilityPoints = Math.max(0, (c.sheet.abilityPoints || 0) - node.cost);
+    ranksOf(c, tree.id)[node.id] = st.rank + 1;
+    persist();
+    if (typeof Net !== 'undefined') {
+      try { Net.sendProgress(tree.id, ranksOf(c, tree.id), c.sheet.abilityPoints, charLabel(c)); } catch (e) {}
+    }
+    return true;
+  }
+  function charLabel(c) { return ((c.nome || '') + ' ' + (c.cognome || '')).trim() || c.nome || 'PG'; }
+
+  function viewAbilita(c) {
+    var frag = document.createElement('div');
+    frag.appendChild(sectionHead('Abilità'));
+
+    // Barra punti abilità
+    var bar = document.createElement('div'); bar.className = 'stats-bar ability-bar';
+    bar.innerHTML =
+      '<div class="ab-points"><span class="ap-label">Punti abilità</span>' +
+      '<span class="ap-val">' + (c.sheet.abilityPoints || 0) + '</span></div>' +
+      '<span class="ab-hint">Sbloccate e potenziate dal Master</span>';
+    frag.appendChild(bar);
+
+    var trees = c.sheet.abilita || [];
+    if (trees.length === 0) {
+      frag.appendChild(emptyHint('Nessuna abilità ancora. Il Master crea e sblocca le abilità durante il gioco e te le invia.'));
+      return frag;
+    }
+
+    trees.forEach(function (tree) {
+      frag.appendChild(renderAbilityTree(c, tree));
+    });
+    return frag;
+  }
+
+  function renderAbilityTree(c, tree) {
+    var box = document.createElement('div'); box.className = 'ability-tree';
+    var head = document.createElement('div'); head.className = 'tree-head';
+    head.innerHTML = '<h4>' + esc(tree.name || 'Abilità') + '</h4>' + (tree.desc ? '<p>' + esc(tree.desc) + '</p>' : '');
+    box.appendChild(head);
+
+    var canvas = document.createElement('div'); canvas.className = 'tree-canvas';
+    canvas.setAttribute('data-tree', tree.id);
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'tree-links');
+    canvas.appendChild(svg);
+    var tiersWrap = document.createElement('div'); tiersWrap.className = 'tree-tiers';
+    canvas.appendChild(tiersWrap);
+
+    // raggruppa per tier
+    var byTier = {};
+    (tree.nodes || []).forEach(function (n) { (byTier[n.tier] = byTier[n.tier] || []).push(n); });
+    Object.keys(byTier).map(Number).sort(function (a, b) { return a - b; }).forEach(function (t) {
+      var row = document.createElement('div'); row.className = 'tree-tier';
+      byTier[t].forEach(function (node) { row.appendChild(abilityNodeEl(c, tree, node)); });
+      tiersWrap.appendChild(row);
+    });
+
+    box.appendChild(canvas);
+    // disegna i collegamenti dopo il layout
+    requestAnimationFrame(function () { drawTreeLinks(canvas, tree, c); });
+    return box;
+  }
+
+  function abilityNodeEl(c, tree, node) {
+    var st = nodeStatus(c, tree, node);
+    var el = document.createElement('button');
+    el.className = 'ability-node' + (st.locked ? ' locked' : '') + (st.taken ? ' taken' : '') +
+      (st.canTake ? ' available' : '') + (st.atMax && st.taken ? ' maxed' : '');
+    el.setAttribute('data-node', node.id);
+    var rankBadge = '';
+    if (node.repeatable) {
+      var maxTxt = (node.maxRank == null) ? '∞' : node.maxRank;
+      rankBadge = '<span class="nd-rank">' + st.rank + '/' + maxTxt + '</span>';
+    } else if (st.taken) {
+      rankBadge = '<span class="nd-rank">✓</span>';
+    }
+    el.innerHTML =
+      '<span class="nd-ico">' + (st.locked ? '🔒' : (st.taken ? '★' : '☆')) + '</span>' +
+      '<span class="nd-name">' + esc(node.name || 'Nodo') + '</span>' +
+      '<span class="nd-meta">' + (node.cost ? ('costo ' + node.cost) : 'gratis') + rankBadge + '</span>';
+    el.addEventListener('click', function () { openNodeDialog(c, tree, node); });
+    return el;
+  }
+
+  function openNodeDialog(c, tree, node) {
+    var st = nodeStatus(c, tree, node);
+    var body = document.createElement('div');
+    var info = [];
+    info.push('<p>' + (node.desc ? esc(node.desc) : '<i>Nessuna descrizione.</i>') + '</p>');
+    var bits = [];
+    bits.push('Costo: <b>' + node.cost + '</b> punt' + (node.cost === 1 ? 'o' : 'i'));
+    if (node.repeatable) bits.push('Rango: <b>' + st.rank + '/' + (node.maxRank == null ? '∞' : node.maxRank) + '</b>');
+    else bits.push(st.taken ? 'Stato: <b>presa</b>' : 'Stato: <b>non presa</b>');
+    if (node.parents && node.parents.length) {
+      var pnames = node.parents.map(function (pid) {
+        var p = (tree.nodes || []).filter(function (x) { return x.id === pid; })[0];
+        return p ? esc(p.name) : '?';
+      }).join(', ');
+      bits.push('Richiede: ' + pnames);
+    }
+    info.push('<p class="nd-bits">' + bits.join(' · ') + '</p>');
+    if (!st.canTake) info.push('<p class="nd-warn">' + esc(st.reason) + '</p>');
+    body.innerHTML = info.join('');
+
+    var actions = [{ label: 'Chiudi', onClick: closeModal }];
+    if (st.canTake) {
+      actions.push({
+        label: 'Prendi (−' + node.cost + ')', cls: 'primary',
+        onClick: function () { if (takeNode(c, tree, node)) { closeModal(); renderSection(); } }
+      });
+    }
+    openModal({ title: node.name || 'Nodo abilità', bodyNode: body, actions: actions });
+  }
+
+  // Disegna i connettori SVG da ogni nodo ai suoi genitori (posizioni misurate).
+  function drawTreeLinks(canvas, tree, c) {
+    var svg = canvas.querySelector('.tree-links');
+    if (!svg) return;
+    var crect = canvas.getBoundingClientRect();
+    if (!crect.width) return;
+    svg.setAttribute('width', crect.width);
+    svg.setAttribute('height', crect.height);
+    svg.setAttribute('viewBox', '0 0 ' + crect.width + ' ' + crect.height);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+    function anchorOf(nodeId) {
+      var elx = canvas.querySelector('.ability-node[data-node="' + cssEsc(nodeId) + '"]');
+      if (!elx) return null;
+      var r = elx.getBoundingClientRect();
+      return { x: r.left - crect.left + r.width / 2, top: r.top - crect.top, bottom: r.top - crect.top + r.height };
+    }
+    (tree.nodes || []).forEach(function (node) {
+      (node.parents || []).forEach(function (pid) {
+        var child = anchorOf(node.id);
+        var par = anchorOf(pid);
+        if (!child || !par) return;
+        var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', par.x); line.setAttribute('y1', par.bottom);
+        line.setAttribute('x2', child.x); line.setAttribute('y2', child.top);
+        line.setAttribute('class', nodeRank(c, tree.id, pid) >= 1 ? 'lnk on' : 'lnk');
+        svg.appendChild(line);
+      });
+    });
+  }
+  function cssEsc(s) { return String(s).replace(/"/g, '\\"'); }
+
+  // ridisegna i link di tutti gli alberi visibili (es. al resize)
+  function redrawAllAbilityLinks() {
+    var c = getChar(currentCharId); if (!c) return;
+    $all('#sheet-panel .tree-canvas').forEach(function (cv) {
+      var tid = cv.getAttribute('data-tree');
+      var tree = (c.sheet.abilita || []).filter(function (t) { return t.id === tid; })[0];
+      if (tree) drawTreeLinks(cv, tree, c);
+    });
+  }
+  window.addEventListener('resize', function () { if (currentView === 'sheet' && currentSection === 'abilita') redrawAllAbilityLinks(); });
 
   /* ---- Liste generiche: abilità / armamenti (nome + descrizione) ---- */
   function viewList(c, key, title, icon, addLabel) {
@@ -1020,6 +1212,7 @@
     var items = [];
     if (appRole === 'master') {
       items.push({ ico: '🛠️', label: 'Plancia', go: function () { navTo('master'); } });
+      items.push({ ico: '🌳', label: 'Abilità', go: function () { navTo('ability-editor'); } });
       items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
       items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
       items.push({ ico: '🖼️', label: 'Mostra immagine a tutti', go: function () { closeAppDrawer(); pickBroadcastImage(); } });
@@ -1084,7 +1277,11 @@
       if (s.state === 'error') toast(s.message || 'Errore di connessione', 'err');
       else if (s.state === 'closed') toast(s.message || 'Sessione chiusa', 'err');
       else if (s.state === 'hosting') toast('Sessione avviata', 'ok');
-      else if (s.state === 'connected') toast('Collegato alla sessione', 'ok');
+      else if (s.state === 'connected') {
+        toast('Collegato alla sessione', 'ok');
+        var ac = getChar(activeCharId);
+        if (ac && typeof Net !== 'undefined') { try { Net.whoami(charLabel(ac)); } catch (e) {} }
+      }
       if (currentView === 'session') renderSession();
       if (currentView === 'master') renderMaster();
       if (currentView === 'messages') updateComposerState();
@@ -1099,6 +1296,46 @@
     Net.on('sys', function (d) { addChatMessage({ system: true, text: d.text, ts: Date.now(), id: 'sys-' + Math.random() }); });
     Net.on('image', function (d) { showSpotlight(d.image, d.caption, true); });
     Net.on('image-close', function () { hideSpotlight(); });
+    Net.on('tree-push', function (d) { applyIncomingTree(d.tree); });
+    Net.on('tree-unlock', function (d) { applyUnlock(d.treeId, d.nodeId, d.unlocked); });
+    Net.on('points-grant', function (d) { applyPointsGrant(d.amount); });
+    Net.on('tree-progress', function (d) {
+      masterProgress[d.from] = d;
+      if (currentView === 'ability-editor') renderAbilityEditor();
+    });
+  }
+
+  /* ---- Lato giocatore: ricezione abilità/punti dal Master ---- */
+  function activeChar() { return getChar(activeCharId) || getChar(currentCharId); }
+  function refreshAbilitaIfOpen() {
+    if (currentView === 'sheet' && currentSection === 'abilita') renderSection();
+  }
+  function applyIncomingTree(tree) {
+    var c = activeChar();
+    if (!c) { toast('Scegli una scheda in Sessione per ricevere le abilità', 'err'); return; }
+    var nt = Store.normalizeTree(tree);
+    var idx = (c.sheet.abilita || []).map(function (t) { return t.id; }).indexOf(nt.id);
+    if (idx >= 0) c.sheet.abilita[idx] = nt; else c.sheet.abilita.push(nt);
+    persist();
+    toast('Abilità "' + (nt.name || '') + '" ricevuta dal Master', 'ok');
+    refreshAbilitaIfOpen();
+  }
+  function applyUnlock(treeId, nodeId, unlocked) {
+    var c = activeChar(); if (!c) return;
+    var tree = (c.sheet.abilita || []).filter(function (t) { return t.id === treeId; })[0]; if (!tree) return;
+    var node = (tree.nodes || []).filter(function (n) { return n.id === nodeId; })[0]; if (!node) return;
+    node.unlocked = !!unlocked; persist();
+    toast(unlocked ? '🔓 Un nodo abilità è stato sbloccato!' : 'Un nodo abilità è stato bloccato');
+    refreshAbilitaIfOpen();
+  }
+  function applyPointsGrant(amount) {
+    var c = activeChar();
+    if (!c) { toast('Scegli una scheda in Sessione per ricevere i punti', 'err'); return; }
+    var n = parseInt(amount, 10) || 0;
+    c.sheet.abilityPoints = Math.max(0, (c.sheet.abilityPoints || 0) + n);
+    persist();
+    toast((n >= 0 ? '+' : '') + n + ' punti abilità dal Master', 'ok');
+    refreshAbilitaIfOpen();
   }
 
   function addChatMessage(msg) {
@@ -1167,8 +1404,13 @@
       var row = document.createElement('div'); row.className = 'member' + (m.role === 'master' ? ' is-master' : '');
       row.innerHTML =
         '<span class="m-ico">' + (m.role === 'master' ? '📜' : '⚔️') + '</span>' +
-        '<span class="m-name">' + esc(m.name) + (m.id === st.myId ? ' (tu)' : '') + '</span>' +
+        '<span class="m-name">' + esc(m.name) + (m.charName ? (' · ' + esc(m.charName)) : '') + (m.id === st.myId ? ' (tu)' : '') + '</span>' +
         '<span class="m-role">' + (m.role === 'master' ? 'Master' : 'Player') + '</span>';
+      if (st.role === 'master' && m.role === 'player') {
+        var gb = document.createElement('button'); gb.className = 'tool-btn member-pts'; gb.textContent = '＋ punti';
+        gb.addEventListener('click', function () { grantPointsDialog(m.id); });
+        row.appendChild(gb);
+      }
       list.appendChild(row);
     });
     c.appendChild(list);
@@ -1217,6 +1459,28 @@
     if (st.connected) {
       var card = document.createElement('div'); card.className = 'panel-card';
       card.innerHTML = '<h3>Sei in sessione</h3><p class="muted">Codice stanza: <b>' + esc(st.code || '') + '</b></p>';
+      // scelta del personaggio attivo (riceve abilità e punti dal Master)
+      var cf = document.createElement('div'); cf.className = 'field'; cf.style.marginTop = '10px';
+      cf.innerHTML = '<label>Gioco con</label>';
+      var csel = document.createElement('select'); csel.className = 'chat-to'; csel.style.maxWidth = '100%';
+      var o0 = document.createElement('option'); o0.value = ''; o0.textContent = '— scegli una scheda —'; csel.appendChild(o0);
+      state.characters.forEach(function (ch) {
+        var o = document.createElement('option'); o.value = ch.id; o.textContent = charLabel(ch); csel.appendChild(o);
+      });
+      csel.value = activeCharId || '';
+      csel.addEventListener('change', function () {
+        activeCharId = this.value || null;
+        var ch = getChar(activeCharId);
+        if (ch && typeof Net !== 'undefined') { try { Net.whoami(charLabel(ch)); } catch (e) {} }
+        if (ch) toast('Giochi con ' + charLabel(ch), 'ok');
+      });
+      cf.appendChild(csel);
+      if (state.characters.length === 0) {
+        var hint = document.createElement('p'); hint.className = 'muted'; hint.style.marginTop = '6px';
+        hint.textContent = 'Non hai schede: creane una nella sezione Player per ricevere abilità.';
+        cf.appendChild(hint);
+      }
+      card.appendChild(cf);
       var actions = document.createElement('div');
       actions.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;';
       actions.appendChild(btn('💬 Vai ai messaggi', 'primary', function () { navTo('messages'); }));
@@ -1248,6 +1512,202 @@
       card2.appendChild(form);
       body.appendChild(card2);
     }
+  }
+
+  /* ---- Editor abilità (Master) ---- */
+  function connectedPlayers() { return (netMembers || []).filter(function (m) { return m.role === 'player'; }); }
+
+  function renderAbilityEditor() {
+    var body = $('#ability-editor-body'); if (!body) return;
+    body.innerHTML = '';
+    if (!state.master.trees) state.master.trees = [];
+    var trees = state.master.trees;
+    if (editingTreeId) {
+      var tree = trees.filter(function (t) { return t.id === editingTreeId; })[0];
+      if (!tree) { editingTreeId = null; return renderAbilityEditor(); }
+      renderTreeEditor(body, tree);
+    } else {
+      renderTreeList(body, trees);
+    }
+  }
+
+  function renderTreeList(body, trees) {
+    var head = document.createElement('div'); head.className = 'panel-card';
+    head.innerHTML = '<h3>Alberi abilità</h3><p class="muted">Crea un albero, aggiungi nodi collegati, sblocca per trama e invialo al giocatore. I punti li concedi tu.</p>';
+    head.appendChild(btn('＋ Nuovo albero', 'primary', newTreeDialog));
+    body.appendChild(head);
+    if (trees.length === 0) { body.appendChild(emptyHint('Nessun albero. Creane uno con “Nuovo albero”.')); return; }
+    trees.forEach(function (t) {
+      var card = document.createElement('div'); card.className = 'panel-card';
+      var tgt = t.targetName ? esc(t.targetName) : 'non assegnato';
+      card.innerHTML = '<h4 class="tree-li-name">' + esc(t.name) + '</h4>' +
+        '<p class="muted">' + (t.nodes ? t.nodes.length : 0) + ' nodi · destinatario: ' + tgt + '</p>';
+      var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;';
+      row.appendChild(btn('Apri', 'primary', function () { editingTreeId = t.id; renderAbilityEditor(); }));
+      row.appendChild(btn('Elimina', 'danger', function () {
+        confirmDialog('Elimina albero', 'Eliminare "' + t.name + '"?', 'Elimina', true).then(function (ok) {
+          if (!ok) return; state.master.trees = trees.filter(function (x) { return x.id !== t.id; }); persist(); renderAbilityEditor();
+        });
+      }));
+      card.appendChild(row);
+      body.appendChild(card);
+    });
+  }
+
+  function newTreeDialog() {
+    twoFieldDialog('Nuovo albero', 'Nome', 'Es. Via della Lama', 'Descrizione', 'A cosa serve...', function (name, desc) {
+      var t = Store.normalizeTree({ name: name, desc: desc, nodes: [] });
+      t.targetMemberId = null; t.targetName = '';
+      state.master.trees.unshift(t); persist(); editingTreeId = t.id; renderAbilityEditor();
+    }, '', '', true);
+  }
+
+  function renderTreeEditor(body, tree) {
+    var top = document.createElement('div'); top.className = 'panel-card';
+    var titleRow = document.createElement('div'); titleRow.style.cssText = 'display:flex;align-items:center;gap:10px;';
+    titleRow.innerHTML = '<h3 style="flex:1;margin:0">' + esc(tree.name) + '</h3>';
+    titleRow.appendChild(btn('‹ Alberi', '', function () { editingTreeId = null; renderAbilityEditor(); }));
+    top.appendChild(titleRow);
+    if (tree.desc) { var d = document.createElement('p'); d.className = 'muted'; d.textContent = tree.desc; top.appendChild(d); }
+
+    var tf = document.createElement('div'); tf.className = 'field'; tf.style.marginTop = '10px';
+    tf.innerHTML = '<label>Destinatario (giocatore connesso)</label>';
+    var sel = document.createElement('select'); sel.className = 'chat-to';
+    var o0 = document.createElement('option'); o0.value = ''; o0.textContent = '— non assegnato —'; sel.appendChild(o0);
+    connectedPlayers().forEach(function (m) {
+      var o = document.createElement('option'); o.value = m.id; o.textContent = m.name + (m.charName ? (' — ' + m.charName) : ''); sel.appendChild(o);
+    });
+    sel.value = tree.targetMemberId || '';
+    sel.addEventListener('change', function () {
+      tree.targetMemberId = this.value || null;
+      var m = netMembers.filter(function (x) { return x.id === tree.targetMemberId; })[0];
+      tree.targetName = m ? (m.charName || m.name) : ''; persist();
+    });
+    tf.appendChild(sel);
+    top.appendChild(tf);
+
+    var acts = document.createElement('div'); acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;';
+    acts.appendChild(btn('📤 Invia al giocatore', 'primary', function () { sendTreeToTarget(tree); }));
+    acts.appendChild(btn('＋ Aggiungi nodo', '', function () { nodeDialog(tree, null); }));
+    acts.appendChild(btn('🎖 Concedi punti', '', function () { grantPointsDialog(tree.targetMemberId); }));
+    top.appendChild(acts);
+    body.appendChild(top);
+
+    var pr = tree.targetMemberId && masterProgress[tree.targetMemberId];
+    if (pr && pr.treeId === tree.id) {
+      var prc = document.createElement('div'); prc.className = 'panel-card';
+      var taken = Object.keys(pr.ranks || {}).filter(function (k) { return pr.ranks[k] >= 1; }).length;
+      prc.innerHTML = '<h4>Progressi di ' + esc(pr.charName || tree.targetName || 'giocatore') + '</h4>' +
+        '<p class="muted">Punti rimasti: ' + (pr.points != null ? pr.points : '?') + ' · nodi presi: ' + taken + '</p>';
+      body.appendChild(prc);
+    }
+
+    var listCard = document.createElement('div'); listCard.className = 'panel-card';
+    listCard.innerHTML = '<h4>Nodi (' + tree.nodes.length + ')</h4>';
+    if (tree.nodes.length === 0) listCard.appendChild(emptyHint('Nessun nodo. Aggiungine uno con “Aggiungi nodo”.'));
+    tree.nodes.slice().sort(function (a, b) { return a.tier - b.tier; }).forEach(function (node) {
+      var r = document.createElement('div'); r.className = 'node-row';
+      var pnames = (node.parents || []).map(function (pid) { var p = tree.nodes.filter(function (x) { return x.id === pid; })[0]; return p ? p.name : '?'; }).join(', ');
+      r.innerHTML = '<div class="nr-main"><div class="nr-name">' + esc(node.name || 'Nodo') + '</div>' +
+        '<div class="nr-sub">liv. ' + node.tier + ' · costo ' + node.cost +
+        (node.repeatable ? (' · rip. ×' + (node.maxRank == null ? '∞' : node.maxRank)) : '') +
+        (pnames ? (' · da: ' + esc(pnames)) : '') + '</div></div>';
+      var ctr = document.createElement('div'); ctr.className = 'nr-ctrl';
+      var lockBtn = document.createElement('button');
+      lockBtn.className = 'tool-btn' + (node.unlocked ? ' active' : ''); lockBtn.textContent = node.unlocked ? '🔓' : '🔒';
+      lockBtn.title = node.unlocked ? 'Sbloccato' : 'Bloccato';
+      lockBtn.addEventListener('click', function () { toggleUnlock(tree, node); });
+      var editBtn = document.createElement('button'); editBtn.className = 'icon-btn'; editBtn.textContent = '✎';
+      editBtn.addEventListener('click', function () { nodeDialog(tree, node); });
+      var delBtn = document.createElement('button'); delBtn.className = 'icon-btn'; delBtn.textContent = '×';
+      delBtn.addEventListener('click', function () {
+        tree.nodes = tree.nodes.filter(function (x) { return x.id !== node.id; });
+        tree.nodes.forEach(function (x) { x.parents = (x.parents || []).filter(function (p) { return p !== node.id; }); });
+        persist(); renderAbilityEditor();
+      });
+      ctr.appendChild(lockBtn); ctr.appendChild(editBtn); ctr.appendChild(delBtn);
+      r.appendChild(ctr);
+      listCard.appendChild(r);
+    });
+    body.appendChild(listCard);
+  }
+
+  function sendTreeToTarget(tree) {
+    if (!tree.targetMemberId) { toast('Scegli un destinatario', 'err'); return; }
+    if (typeof Net === 'undefined' || !Net.status().connected) { toast('Avvia prima la sessione', 'err'); return; }
+    var ok = Net.pushTree(tree.targetMemberId, Store.normalizeTree({ id: tree.id, name: tree.name, desc: tree.desc, nodes: tree.nodes }));
+    toast(ok ? ('Albero inviato a ' + (tree.targetName || 'giocatore')) : 'Giocatore non collegato', ok ? 'ok' : 'err');
+  }
+  function toggleUnlock(tree, node) {
+    node.unlocked = !node.unlocked; persist(); renderAbilityEditor();
+    if (tree.targetMemberId && typeof Net !== 'undefined' && Net.status().connected) {
+      Net.unlockNode(tree.targetMemberId, tree.id, node.id, node.unlocked);
+    }
+  }
+  function grantPointsDialog(memberId) {
+    if (!memberId) { toast('Scegli prima un destinatario', 'err'); return; }
+    if (typeof Net === 'undefined' || !Net.status().connected) { toast('Avvia prima la sessione', 'err'); return; }
+    singleFieldDialog('Concedi punti abilità', 'Quanti punti', '', 'Es. 3', function (v) {
+      var n = parseInt(v, 10); if (isNaN(n) || n === 0) return;
+      var ok = Net.grantPoints(memberId, n);
+      toast(ok ? ('Concessi ' + n + ' punti') : 'Giocatore non collegato', ok ? 'ok' : 'err');
+    });
+  }
+
+  function nodeDialog(tree, node) {
+    var editing = !!node;
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    wrap.innerHTML =
+      '<div class="field"><label>Nome</label><input id="nd-name" maxlength="40" /></div>' +
+      '<div class="field"><label>Descrizione</label><textarea id="nd-desc" rows="3" maxlength="500"></textarea></div>' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Livello (riga)</label><input id="nd-tier" type="number" inputmode="numeric" min="0" /></div>' +
+        '<div class="field"><label>Costo punti</label><input id="nd-cost" type="number" inputmode="numeric" min="0" /></div>' +
+      '</div>' +
+      '<label class="chk"><input type="checkbox" id="nd-rep" /> Ripetibile (più ranghi)</label>' +
+      '<div class="field" id="nd-maxwrap"><label>Rango massimo (vuoto = infinito)</label><input id="nd-max" type="number" inputmode="numeric" min="1" /></div>' +
+      '<div class="field"><label>Prerequisiti (nodi genitori)</label><div id="nd-parents" class="parents-pick"></div></div>' +
+      '<label class="chk"><input type="checkbox" id="nd-unlock" /> Già sbloccato (disponibile subito)</label>';
+    var nm = wrap.querySelector('#nd-name'), ds = wrap.querySelector('#nd-desc'), tr = wrap.querySelector('#nd-tier'),
+        co = wrap.querySelector('#nd-cost'), rp = wrap.querySelector('#nd-rep'), mx = wrap.querySelector('#nd-max'),
+        ul = wrap.querySelector('#nd-unlock'), pp = wrap.querySelector('#nd-parents'), mw = wrap.querySelector('#nd-maxwrap');
+    nm.value = node ? node.name : '';
+    ds.value = node ? node.desc : '';
+    tr.value = node ? node.tier : 0;
+    co.value = node ? node.cost : 1;
+    rp.checked = node ? node.repeatable : false;
+    ul.checked = node ? node.unlocked : false;
+    mx.value = (node && node.maxRank != null) ? node.maxRank : '';
+    function syncMax() { mw.style.display = rp.checked ? '' : 'none'; }
+    rp.addEventListener('change', syncMax); syncMax();
+    var others = tree.nodes.filter(function (x) { return !node || x.id !== node.id; });
+    if (others.length === 0) { pp.innerHTML = '<span class="muted">Nessun altro nodo disponibile</span>'; }
+    others.forEach(function (x) {
+      var lab = document.createElement('label'); lab.className = 'chk';
+      var ck = document.createElement('input'); ck.type = 'checkbox'; ck.value = x.id;
+      if (node && (node.parents || []).indexOf(x.id) >= 0) ck.checked = true;
+      lab.appendChild(ck);
+      lab.appendChild(document.createTextNode(' ' + (x.name || 'Nodo') + ' (liv.' + x.tier + ')'));
+      pp.appendChild(lab);
+    });
+    function save() {
+      var name = nm.value.trim(); if (!name) { nm.focus(); return; }
+      var parents = Array.prototype.slice.call(pp.querySelectorAll('input:checked')).map(function (i) { return i.value; });
+      var data = {
+        id: node ? node.id : undefined, name: name, desc: ds.value.trim(),
+        tier: parseInt(tr.value, 10) || 0, cost: parseInt(co.value, 10) || 0,
+        repeatable: rp.checked, maxRank: rp.checked ? (mx.value === '' ? null : (parseInt(mx.value, 10) || 1)) : 1,
+        unlocked: ul.checked, parents: parents
+      };
+      var nn = Store.normalizeNode(data);
+      if (node) { var i = tree.nodes.map(function (x) { return x.id; }).indexOf(node.id); tree.nodes[i] = nn; }
+      else tree.nodes.push(nn);
+      persist(); closeModal(); renderAbilityEditor();
+    }
+    openModal({
+      title: editing ? 'Modifica nodo' : 'Nuovo nodo', bodyNode: wrap, focus: '#nd-name',
+      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }]
+    });
   }
 
   /* ---- Vista MESSAGGI (chat) ---- */
@@ -1366,7 +1826,7 @@
   }
 
   /* ---- wiring eventi DOM (sessione/messaggi/spotlight/drawer) ---- */
-  ['#player-menu-btn', '#master-menu-btn', '#session-menu-btn', '#messages-menu-btn'].forEach(function (s) {
+  ['#player-menu-btn', '#master-menu-btn', '#session-menu-btn', '#messages-menu-btn', '#abilities-menu-btn'].forEach(function (s) {
     var el = $(s); if (el) el.addEventListener('click', openAppDrawer);
   });
   $('#app-drawer-overlay').addEventListener('click', closeAppDrawer);

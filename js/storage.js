@@ -62,11 +62,59 @@
     return {
       level: 1,                     // livello del personaggio
       statistiche: makeCoreStats(), // { id, abbr, name, value, core }
-      abilita: [],                  // { id, name, desc }
+      abilita: [],                  // alberi abilità: [ tree ] (vedi normalizeTree)
+      abilityPoints: 0,             // punti abilità non spesi (concessi dal Master)
+      abilityRanks: {},             // progressi: { [treeId]: { [nodeId]: rank } }
       armamenti: [],                // { id, name, desc }
       zaino: [],                    // { id, name, qty, desc }
       combattimento: ''             // testo libero (note di combattimento)
     };
+  }
+
+  /* ---------- Abilità ad albero ---------- */
+  // Normalizza un nodo dell'albero abilità.
+  function normalizeNode(n) {
+    n = n || {};
+    var maxRank;
+    if (n.repeatable) {
+      maxRank = (n.maxRank == null) ? null : Math.max(1, parseInt(n.maxRank, 10) || 1);
+    } else {
+      maxRank = 1;
+    }
+    return {
+      id: n.id || genId(),
+      name: typeof n.name === 'string' ? n.name : '',
+      desc: typeof n.desc === 'string' ? n.desc : '',
+      tier: Math.max(0, parseInt(n.tier, 10) || 0),
+      parents: Array.isArray(n.parents) ? n.parents.filter(function (p) { return typeof p === 'string'; }) : [],
+      cost: Math.max(0, parseInt(n.cost, 10) || 0),
+      repeatable: !!n.repeatable,
+      maxRank: maxRank,
+      unlocked: !!n.unlocked
+    };
+  }
+  // Normalizza un albero abilità.
+  function normalizeTree(t) {
+    t = t || {};
+    return {
+      id: t.id || genId(),
+      name: typeof t.name === 'string' ? t.name : 'Abilità',
+      desc: typeof t.desc === 'string' ? t.desc : '',
+      nodes: Array.isArray(t.nodes) ? t.nodes.map(normalizeNode) : []
+    };
+  }
+  // Converte eventuali vecchie voci piatte {id,name,desc} in un albero unico.
+  function migrateAbilita(arr) {
+    if (!Array.isArray(arr) || arr.length === 0) return [];
+    // già nel nuovo formato? (un elemento con array nodes => è un albero)
+    var looksLikeTrees = arr.every(function (x) { return x && Array.isArray(x.nodes); });
+    if (looksLikeTrees) return arr.map(normalizeTree);
+    // formato piatto legacy => albero unico, nodi tier 0, sbloccati, costo 0
+    var nodes = arr.filter(function (x) { return x && (x.name || x.desc); }).map(function (x) {
+      return normalizeNode({ id: x.id, name: x.name, desc: x.desc, tier: 0, cost: 0, unlocked: true });
+    });
+    if (nodes.length === 0) return [];
+    return [normalizeTree({ name: 'Abilità', nodes: nodes })];
   }
 
   function genId() {
@@ -83,6 +131,9 @@
       data.characters = Array.isArray(data.characters) ? data.characters : [];
       data.folders = Array.isArray(data.folders) ? data.folders : [];
       data.master = data.master || {};
+      data.master.trees = Array.isArray(data.master.trees) ? data.master.trees.map(function (t) {
+        var nt = normalizeTree(t); nt.targetMemberId = t.targetMemberId || null; nt.targetName = t.targetName || ''; return nt;
+      }) : [];
       // normalizza schede mancanti
       data.characters.forEach(function (c) {
         c.sheet = mergeSheet(c.sheet);
@@ -99,7 +150,9 @@
     if (!sheet || typeof sheet !== 'object') return base;
     base.level = Math.max(1, parseInt(sheet.level, 10) || 1);
     base.statistiche = Array.isArray(sheet.statistiche) ? sheet.statistiche : [];
-    base.abilita = Array.isArray(sheet.abilita) ? sheet.abilita : [];
+    base.abilita = migrateAbilita(sheet.abilita);
+    base.abilityPoints = Math.max(0, parseInt(sheet.abilityPoints, 10) || 0);
+    base.abilityRanks = (sheet.abilityRanks && typeof sheet.abilityRanks === 'object') ? sheet.abilityRanks : {};
     base.armamenti = Array.isArray(sheet.armamenti) ? sheet.armamenti : [];
     base.zaino = Array.isArray(sheet.zaino) ? sheet.zaino : [];
     base.combattimento = typeof sheet.combattimento === 'string' ? sheet.combattimento : '';
@@ -174,6 +227,8 @@
     POINTS_PER_LEVEL: POINTS_PER_LEVEL,
     STAT_MIN: STAT_MIN,
     pointsBudget: pointsBudget,
+    normalizeTree: normalizeTree,
+    normalizeNode: normalizeNode,
     genId: genId,
     load: load,
     save: save,

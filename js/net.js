@@ -89,11 +89,16 @@
     if (!d || !d.t) return;
     if (d.t === 'hello') {
       conns[conn.peer] = conn;
-      upsertMember({ id: conn.peer, name: (d.name || 'Giocatore'), role: 'player' });
+      upsertMember({ id: conn.peer, name: (d.name || 'Giocatore'), role: 'player', charName: d.charName || '' });
       broadcastRoster();
       emit('sys', { text: (d.name || 'Un giocatore') + ' si è unito alla sessione.' });
+    } else if (d.t === 'whoami') {
+      var m = roster.filter(function (x) { return x.id === conn.peer; })[0];
+      if (m) { m.charName = d.charName || ''; broadcastRoster(); }
     } else if (d.t === 'chat') {
       routeChat(conn.peer, d);
+    } else if (d.t === 'tree-progress') {
+      emit('tree-progress', { from: conn.peer, treeId: d.treeId, ranks: d.ranks || {}, points: d.points, charName: d.charName || '' });
     }
   }
 
@@ -156,6 +161,9 @@
     else if (d.t === 'image') { emit('image', d); }
     else if (d.t === 'image-close') { emit('image-close', {}); }
     else if (d.t === 'sys') { emit('sys', d); }
+    else if (d.t === 'tree-push') { emit('tree-push', { tree: d.tree }); }
+    else if (d.t === 'tree-unlock') { emit('tree-unlock', { treeId: d.treeId, nodeId: d.nodeId, unlocked: !!d.unlocked }); }
+    else if (d.t === 'points-grant') { emit('points-grant', { amount: d.amount }); }
   }
 
   /* ===================== INVIO (condiviso) ===================== */
@@ -172,6 +180,36 @@
       safeSend(conns.master, msg); // il master fa da hub e instrada
     }
     return true;
+  }
+
+  /* ---- Abilità ad albero ---- */
+  // Master → un giocatore: invia/aggiorna un albero abilità.
+  function pushTree(memberId, tree) {
+    if (role !== 'master') return false;
+    if (conns[memberId]) { safeSend(conns[memberId], { t: 'tree-push', tree: tree }); return true; }
+    return false;
+  }
+  // Master → un giocatore: sblocca/blocca un nodo.
+  function unlockNode(memberId, treeId, nodeId, unlocked) {
+    if (role !== 'master') return false;
+    if (conns[memberId]) { safeSend(conns[memberId], { t: 'tree-unlock', treeId: treeId, nodeId: nodeId, unlocked: !!unlocked }); return true; }
+    return false;
+  }
+  // Master → un giocatore: concede punti abilità.
+  function grantPoints(memberId, amount) {
+    if (role !== 'master') return false;
+    if (conns[memberId]) { safeSend(conns[memberId], { t: 'points-grant', amount: amount }); return true; }
+    return false;
+  }
+  // Player → master: comunica il personaggio attivo (mostrato nella lista membri).
+  function whoami(charName) {
+    if (role !== 'player' || !connected) return;
+    safeSend(conns.master, { t: 'whoami', charName: charName || '' });
+  }
+  // Player → master: invia i progressi su un albero.
+  function sendProgress(treeId, ranks, points, charName) {
+    if (role !== 'player' || !connected) return;
+    safeSend(conns.master, { t: 'tree-progress', treeId: treeId, ranks: ranks || {}, points: points, charName: charName || '' });
   }
 
   // Solo master: proietta un'immagine sullo schermo di tutti.
@@ -226,6 +264,8 @@
   var Net = {
     on: on, host: host, join: join, sendChat: sendChat,
     broadcastImage: broadcastImage, closeImage: closeImage,
+    pushTree: pushTree, unlockNode: unlockNode, grantPoints: grantPoints,
+    whoami: whoami, sendProgress: sendProgress,
     leave: leave, status: status, available: available, myId: myId
   };
   global.Net = Net;

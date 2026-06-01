@@ -658,8 +658,70 @@ body {
   background: rgba(20,16,12,.7); color: var(--text); font-size: 1.6rem; cursor: pointer; line-height: 1;
 }
 
+/* ============================================================
+   Abilità ad albero
+   ============================================================ */
+/* barra punti abilità */
+.ability-bar { justify-content: space-between; }
+.ab-points { display: flex; flex-direction: column; line-height: 1.1; }
+.ab-points .ap-label { font-size: .62rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+.ab-points .ap-val { font-family: 'Cinzel', serif; font-size: 1.7rem; font-weight: 700; color: var(--accent-3); }
+.ab-hint { font-size: .72rem; color: var(--text-faint); text-align: right; max-width: 45%; }
+
+.ability-tree { margin: 14px 2px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: linear-gradient(160deg, var(--surface-2), var(--surface)); padding: 14px 12px; animation: cardin .4s var(--ease) both; }
+.tree-head h4 { font-family: 'Cinzel', serif; font-size: 1.1rem; color: var(--accent-3); }
+.tree-head p { color: var(--text-dim); font-size: .85rem; margin-top: 2px; line-height: 1.4; }
+
+.tree-canvas { position: relative; margin-top: 12px; }
+.tree-links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+.tree-links .lnk { stroke: var(--line-strong); stroke-width: 2; }
+.tree-links .lnk.on { stroke: var(--accent-3); stroke-width: 2.5; filter: drop-shadow(0 0 3px var(--glow)); }
+.tree-tiers { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 26px; }
+.tree-tier { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+
+.ability-node {
+  position: relative; width: 110px; min-height: 78px; padding: 8px 8px 7px; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--line-strong); background: var(--surface-3); color: var(--text);
+  display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center;
+  transition: transform .18s var(--ease-back), border-color .25s, box-shadow .25s, background .25s;
+}
+.ability-node:active { transform: scale(.94); }
+.ability-node .nd-ico { font-size: 1.25rem; line-height: 1; }
+.ability-node .nd-name { font-size: .82rem; font-weight: 600; line-height: 1.15; }
+.ability-node .nd-meta { font-size: .66rem; color: var(--text-dim); display: flex; gap: 5px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.ability-node .nd-rank { background: rgba(0,0,0,.35); border: 1px solid var(--line); border-radius: 8px; padding: 0 5px; font-weight: 700; color: var(--accent-3); }
+.ability-node.locked { opacity: .55; filter: grayscale(.5); border-style: dashed; }
+.ability-node.available { border-color: var(--accent-3); box-shadow: 0 0 14px var(--glow); }
+.ability-node.taken { background: linear-gradient(160deg, #3a2a14, var(--surface-3)); border-color: var(--accent-2); }
+.ability-node.taken .nd-ico { color: var(--accent-3); }
+.ability-node.maxed { box-shadow: none; }
+
+.nd-bits { color: var(--text-dim); font-size: .85rem; margin-top: 8px; }
+.nd-warn { color: var(--blood-2); font-size: .85rem; margin-top: 8px; font-weight: 600; }
+
+/* ---- Editor abilità (Master) ---- */
+.ability-editor-body { display: flex; flex-direction: column; gap: 14px; }
+.tree-li-name { font-family: 'Cinzel', serif; font-size: 1.05rem; }
+.node-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--line); }
+.node-row:last-child { border-bottom: none; }
+.node-row .nr-main { flex: 1; min-width: 0; }
+.node-row .nr-name { font-weight: 600; }
+.node-row .nr-sub { font-size: .76rem; color: var(--text-dim); margin-top: 2px; }
+.node-row .nr-ctrl { display: flex; align-items: center; gap: 6px; flex: none; }
+.node-row .nr-ctrl .icon-btn { width: 36px; height: 36px; font-size: 1.1rem; border-radius: 10px; }
+.node-row .nr-ctrl .tool-btn { padding: 6px 9px; }
+.member-pts { margin-left: 8px; padding: 4px 10px; flex: none; }
+
+/* checkbox label + multiselect genitori */
+label.chk { display: flex; align-items: center; gap: 8px; font-size: .9rem; color: var(--text); cursor: pointer; }
+label.chk input { width: 18px; height: 18px; accent-color: var(--accent-2); }
+.parents-pick { display: flex; flex-direction: column; gap: 7px; max-height: 160px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; background: var(--surface); }
+
 @media (max-width: 420px) {
   .code-display .code { font-size: 2rem; letter-spacing: 5px; }
+  .ability-node { width: 96px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
