@@ -670,6 +670,7 @@
     }
     c.sheet.level = next;
     persist();
+    if (c.id === activeCharId) sendWhoami(c); // aggiorna il livello mostrato al master
     return true;
   }
 
@@ -861,6 +862,10 @@
     return true;
   }
   function charLabel(c) { return ((c.nome || '') + ' ' + (c.cognome || '')).trim() || c.nome || 'PG'; }
+  // comunica al master il PG attivo + il suo livello
+  function sendWhoami(ch) {
+    if (ch && typeof Net !== 'undefined') { try { Net.whoami(charLabel(ch), ch.sheet.level || 1); } catch (e) {} }
+  }
 
   function abilityProgress(c, ability) {
     var nodes = ability.nodes || [];
@@ -1319,6 +1324,10 @@
       items.push({ ico: '🖼️', label: 'Mostra immagine a tutti', go: function () { closeAppDrawer(); pickBroadcastImage(); } });
     } else {
       items.push({ ico: '🗂️', label: 'Le tue schede', go: function () { navTo('player'); } });
+      var openChar = getChar(currentCharId);
+      if (openChar) {
+        items.push({ ico: '📋', label: 'Scheda: ' + (openChar.nome || 'PG'), go: function () { navTo('sheet'); } });
+      }
       items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
       items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
       items.push({ ico: '💾', label: 'Dati e backup', go: function () { closeAppDrawer(); openDataMenu(); } });
@@ -1387,7 +1396,7 @@
       else if (s.state === 'connected') {
         toast('Collegato alla sessione', 'ok');
         var ac = getChar(activeCharId);
-        if (ac && typeof Net !== 'undefined') { try { Net.whoami(charLabel(ac)); } catch (e) {} }
+        sendWhoami(ac);
       }
       if (currentView === 'session') renderSession();
       if (currentView === 'master') renderMaster();
@@ -1525,9 +1534,11 @@
         mainName = m.charName ? (esc(m.charName) + mine) : ('<span class="m-nochar">personaggio non scelto' + mine + '</span>');
         sub = m.charName ? esc(m.name) : '';
       }
+      var lvlChip = (m.role === 'player' && m.level != null) ? '<span class="m-lvl">Liv. ' + esc(String(m.level)) + '</span>' : '';
       row.innerHTML =
         '<span class="m-ico">' + (m.role === 'master' ? '📜' : '⚔️') + '</span>' +
         '<span class="m-name">' + mainName + (sub ? ('<span class="m-sub"> · ' + sub + '</span>') : '') + '</span>' +
+        lvlChip +
         '<span class="m-role">' + (m.role === 'master' ? 'Master' : 'Player') + '</span>';
       if (st.role === 'master' && m.role === 'player') {
         var gb = document.createElement('button'); gb.className = 'tool-btn member-pts'; gb.textContent = '＋ punti';
@@ -1594,7 +1605,7 @@
       csel.addEventListener('change', function () {
         activeCharId = this.value || null;
         var ch = getChar(activeCharId);
-        if (ch && typeof Net !== 'undefined') { try { Net.whoami(charLabel(ch)); } catch (e) {} }
+        sendWhoami(ch);
         if (ch) toast('Giochi con ' + charLabel(ch), 'ok');
       });
       cf.appendChild(csel);
@@ -1795,6 +1806,7 @@
     var treeCard = document.createElement('div'); treeCard.className = 'panel-card editor-tree-card';
     treeCard.appendChild(buildEditorCanvas(ability));
     body.appendChild(treeCard);
+    scheduleEditorDraw();
   }
 
   function buildEditorCanvas(ability) {
@@ -1822,15 +1834,17 @@
     nextRow.appendChild(addChip(function () { addNodeToTier(ability, maxTier + 1); }, '＋ livello ' + (maxTier + 1)));
     tiersWrap.appendChild(nextRow);
 
-    (function attempt(tries) {
-      if (canvas.getBoundingClientRect().width > 0) {
-        var c = { sheet: { abilityRanks: {}, abilityPoints: 0 } }; // editor: nessun progresso, mostra struttura
-        drawTreeLinks(canvas, ability, c, function (link) { linkDialog(ability, link); });
-        return;
-      }
-      if (tries < 40) requestAnimationFrame(function () { attempt(tries + 1); });
-    })(0);
     return canvas;
+  }
+
+  // disegna i collegamenti dell'editor quando la tela è misurabile (riprova su rAF)
+  function scheduleEditorDraw() {
+    var tries = 0;
+    (function attempt() {
+      var cv = $('#ability-editor-body .tree-canvas');
+      if (cv && cv.getBoundingClientRect().width > 0) { redrawEditorLinks(); return; }
+      if (tries++ < 40) requestAnimationFrame(attempt);
+    })();
   }
 
   function addChip(onClick, label) {

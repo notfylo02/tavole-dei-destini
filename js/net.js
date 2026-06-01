@@ -94,7 +94,7 @@
       emit('sys', { text: (d.name || 'Un giocatore') + ' si è unito alla sessione.' });
     } else if (d.t === 'whoami') {
       var m = roster.filter(function (x) { return x.id === conn.peer; })[0];
-      if (m) { m.charName = d.charName || ''; broadcastRoster(); }
+      if (m) { m.charName = d.charName || ''; if (d.level != null) m.level = d.level; broadcastRoster(); }
     } else if (d.t === 'chat') {
       routeChat(conn.peer, d);
     } else if (d.t === 'tree-progress') {
@@ -201,10 +201,10 @@
     if (conns[memberId]) { safeSend(conns[memberId], { t: 'points-grant', amount: amount }); return true; }
     return false;
   }
-  // Player → master: comunica il personaggio attivo (mostrato nella lista membri).
-  function whoami(charName) {
+  // Player → master: comunica il personaggio attivo + livello (mostrati nella lista membri).
+  function whoami(charName, level) {
     if (role !== 'player' || !connected) return;
-    safeSend(conns.master, { t: 'whoami', charName: charName || '' });
+    safeSend(conns.master, { t: 'whoami', charName: charName || '', level: (level == null ? null : level) });
   }
   // Player → master: invia i progressi su un albero.
   function sendProgress(treeId, ranks, points, charName) {
