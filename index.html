@@ -143,6 +143,7 @@
           <button class="icon-btn" id="drawer-close" aria-label="Chiudi menu">×</button>
         </div>
         <nav class="drawer-nav" id="drawer-nav">
+          <button class="drawer-item" data-section="home"><span class="tab-ico">🏠</span>Panoramica</button>
           <button class="drawer-item" data-section="statistiche"><span class="tab-ico">📊</span>Statistiche</button>
           <button class="drawer-item" data-section="abilita"><span class="tab-ico">✨</span>Abilità</button>
           <button class="drawer-item" data-section="armamenti"><span class="tab-ico">🗡️</span>Armamenti</button>
@@ -178,7 +179,7 @@
         <div class="chat-composer" id="chat-composer">
           <div class="chat-to-row">
             <span class="chat-to-label">A:</span>
-            <select class="chat-to" id="chat-to" aria-label="Destinatario"></select>
+            <button class="chat-to" id="chat-to" type="button" aria-label="Scegli destinatari">Tutti</button>
           </div>
           <div class="chat-input-row">
             <button class="icon-btn chat-attach" id="chat-attach-btn" aria-label="Allega immagine">🖼</button>
@@ -227,6 +228,15 @@
       <button class="icon-btn" id="ao-close" aria-label="Chiudi albero">×</button>
     </div>
     <div class="ao-scroll" id="ao-scroll"></div>
+  </div>
+
+  <!-- ===================== ANNUNCIO (messaggio importante dal Master) ===================== -->
+  <div class="announce" id="announce" hidden>
+    <div class="announce-card">
+      <div class="announce-head">📢 Messaggio dal Master</div>
+      <div class="announce-body" id="announce-body"></div>
+      <button class="tool-btn primary" id="announce-close">Ho capito</button>
+    </div>
   </div>
 
   <!-- ===================== IMMAGINE PROIETTATA (spotlight) ===================== -->

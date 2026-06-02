@@ -438,7 +438,7 @@
     c.lastPlayed = Date.now();
     persist();
     renderSheetHero(c);
-    setSheetSection('statistiche'); // imposta sezione attiva, etichetta e render
+    setSheetSection('home'); // apre sulla panoramica del personaggio
     // noPush: lo stack di navigazione è già stato preparato dal chiamante
     if (noPush) { showView('sheet'); } else { go('sheet'); }
   }
@@ -569,7 +569,7 @@
 
   // Navigazione sezioni scheda (menu a scomparsa laterale)
   var SECTION_LABELS = {
-    statistiche: 'Statistiche', abilita: 'Abilità', armamenti: 'Armamenti',
+    home: 'Panoramica', statistiche: 'Statistiche', abilita: 'Abilità', armamenti: 'Armamenti',
     zaino: 'Zaino', combattimento: 'Combattimento'
   };
 
@@ -617,6 +617,7 @@
     panel.classList.add('panel-in');
 
     switch (currentSection) {
+      case 'home': panel.innerHTML = ''; panel.appendChild(viewSheetHome(c)); break;
       case 'statistiche': panel.innerHTML = ''; panel.appendChild(viewStatistiche(c)); break;
       case 'abilita': panel.innerHTML = ''; panel.appendChild(viewAbilita(c)); break;
       case 'armamenti': panel.innerHTML = ''; panel.appendChild(viewList(c, 'armamenti', 'Armamenti', '🗡️', 'Nuovo armamento')); break;
@@ -681,6 +682,42 @@
     return true;
   }
 
+  // Panoramica del personaggio: info principali + pulsanti di navigazione
+  function viewSheetHome(c) {
+    var frag = document.createElement('div');
+    var pts = c.sheet.abilityPoints || 0;
+    var tags = [c.razza, c.classe].filter(Boolean).join(' · ');
+    var info = document.createElement('div'); info.className = 'panel-card home-info';
+    info.innerHTML =
+      '<div class="hi-row"><span class="hi-k">Livello</span><span class="hi-v">' + (c.sheet.level || 1) + '</span></div>' +
+      '<div class="hi-row"><span class="hi-k">Punti abilità</span><span class="hi-v">' + pts + '</span></div>' +
+      (tags ? '<div class="hi-row"><span class="hi-k">Profilo</span><span class="hi-v small">' + esc(tags) + '</span></div>' : '');
+    frag.appendChild(info);
+
+    var grid = document.createElement('div'); grid.className = 'home-nav';
+    function navBtn(sec, ico, label) {
+      var b = document.createElement('button'); b.className = 'home-btn';
+      b.innerHTML = '<span class="hb-ico">' + ico + '</span><span class="hb-lbl">' + label + '</span>';
+      b.addEventListener('click', function () { setSheetSection(sec); });
+      return b;
+    }
+    grid.appendChild(navBtn('statistiche', '📊', 'Statistiche'));
+    grid.appendChild(navBtn('abilita', '🌳', 'Abilità'));
+    grid.appendChild(navBtn('armamenti', '🗡️', 'Armamenti'));
+    grid.appendChild(navBtn('zaino', '🎒', 'Zaino'));
+    grid.appendChild(navBtn('combattimento', '🔥', 'Combattimento'));
+    frag.appendChild(grid);
+
+    var sc = document.createElement('div'); sc.className = 'home-shortcuts';
+    var msgB = document.createElement('button'); msgB.className = 'tool-btn'; msgB.innerHTML = '💬 Messaggi';
+    msgB.addEventListener('click', function () { navTo('messages'); });
+    var sesB = document.createElement('button'); sesB.className = 'tool-btn'; sesB.innerHTML = '🔗 Sessione';
+    sesB.addEventListener('click', function () { navTo('session'); });
+    sc.appendChild(msgB); sc.appendChild(sesB);
+    frag.appendChild(sc);
+    return frag;
+  }
+
   function viewStatistiche(c) {
     var frag = document.createElement('div');
     frag.appendChild(sectionHead('Statistiche'));
@@ -700,13 +737,13 @@
       '</div>';
     frag.appendChild(bar);
 
-    // Righe statistiche core (aggiornate in-place, niente re-render)
-    var list = document.createElement('div'); list.className = 'stat-list';
-    var rows = coreStats(c).map(function (s) { return statRow(c, s, refresh); });
-    rows.forEach(function (r) { list.appendChild(r.el); });
-    frag.appendChild(list);
+    // Griglia core: 3 per riga, compatte; tap su una cella la espande coi dettagli
+    var grid = document.createElement('div'); grid.className = 'core-grid';
+    var cells = coreStats(c).map(function (s) { return statCell(c, s, refresh); });
+    cells.forEach(function (cc) { grid.appendChild(cc.el); });
+    frag.appendChild(grid);
 
-    // Aggiornamento in-place dell'intera vista (contatore + righe), senza ricostruire il DOM
+    // Aggiornamento in-place dell'intera vista (contatore + celle), senza ricostruire il DOM
     function refresh() {
       var avail = availablePoints(c);
       bar.querySelector('.lvl-val').textContent = c.sheet.level;
@@ -714,7 +751,7 @@
       var pb = bar.querySelector('.points-box');
       pb.querySelector('.pts-val').textContent = avail;
       pb.classList.toggle('no-points', avail === 0);
-      rows.forEach(function (r) { r.update(); });
+      cells.forEach(function (cc) { cc.update(); });
     }
 
     bar.querySelector('[data-lvl="-1"]').addEventListener('click', function () { if (setLevel(c, -1)) refresh(); });
@@ -750,28 +787,35 @@
     return frag;
   }
 
-  // Crea una riga statistica. Ritorna { el, update } per l'aggiornamento in-place.
-  function statRow(c, s, refresh) {
-    var row = document.createElement('div'); row.className = 'stat-row';
-    row.innerHTML =
-      '<div class="sr-head">' +
-        '<span class="sr-abbr">' + esc(s.abbr || s.name) + '</span>' +
-        '<span class="sr-name">' + esc(s.abbr ? s.name : '') + '</span>' +
-      '</div>' +
-      '<div class="sr-ctrl">' +
-        '<button class="step-btn big" data-step="-5" aria-label="-5">−−</button>' +
-        '<button class="step-btn" data-step="-1" aria-label="-1">−</button>' +
-        '<div class="sr-input">' +
-          '<input type="number" inputmode="numeric" class="sr-val" aria-label="Valore ' + esc(s.abbr || s.name) + '" />' +
-          '<button class="confirm-btn" aria-label="Conferma">✓</button>' +
+  // Crea una cella statistica compatta che si espande al tap. Ritorna { el, update }.
+  function statCell(c, s, refresh) {
+    var cell = document.createElement('div'); cell.className = 'core-cell';
+    cell.innerHTML =
+      '<button class="cc-head" type="button">' +
+        '<span class="cc-abbr">' + esc(s.abbr || s.name) + '</span>' +
+        '<span class="cc-val"></span>' +
+      '</button>' +
+      '<div class="cc-detail">' +
+        (s.abbr && s.name ? '<div class="cc-name">' + esc(s.name) + '</div>' : '') +
+        '<div class="sr-ctrl">' +
+          '<button class="step-btn big" data-step="-5" aria-label="-5">−−</button>' +
+          '<button class="step-btn" data-step="-1" aria-label="-1">−</button>' +
+          '<div class="sr-input">' +
+            '<input type="number" inputmode="numeric" class="sr-val" aria-label="Valore ' + esc(s.abbr || s.name) + '" />' +
+            '<button class="confirm-btn" aria-label="Conferma">✓</button>' +
+          '</div>' +
+          '<button class="step-btn" data-step="1" aria-label="+1">+</button>' +
+          '<button class="step-btn big" data-step="5" aria-label="+5">++</button>' +
         '</div>' +
-        '<button class="step-btn" data-step="1" aria-label="+1">+</button>' +
-        '<button class="step-btn big" data-step="5" aria-label="+5">++</button>' +
+        '<div class="cc-bonus"><span class="cc-bonus-lbl">Bonus</span>' +
+          '<p class="muted">I bonus di questa statistica appariranno qui.</p></div>' +
       '</div>';
 
-    var input = row.querySelector('.sr-val');
-    var ups = Array.prototype.slice.call(row.querySelectorAll('[data-step="1"],[data-step="5"]'));
-    var downs = Array.prototype.slice.call(row.querySelectorAll('[data-step="-1"],[data-step="-5"]'));
+    var head = cell.querySelector('.cc-head');
+    var valEl = cell.querySelector('.cc-val');
+    var input = cell.querySelector('.sr-val');
+    var ups = Array.prototype.slice.call(cell.querySelectorAll('[data-step="1"],[data-step="5"]'));
+    var downs = Array.prototype.slice.call(cell.querySelectorAll('[data-step="-1"],[data-step="-5"]'));
 
     function applyManual() {
       var ok = setStatValue(c, s, input.value);
@@ -784,22 +828,29 @@
       if (!ok && d > 0) toast('Punti insufficienti');
       refresh();
     }
-
-    row.querySelectorAll('.step-btn').forEach(function (b) {
-      b.addEventListener('click', function () { step(parseInt(b.getAttribute('data-step'), 10)); });
+    cell.querySelectorAll('.step-btn').forEach(function (b) {
+      b.addEventListener('click', function (e) { e.stopPropagation(); step(parseInt(b.getAttribute('data-step'), 10)); });
     });
-    row.querySelector('.confirm-btn').addEventListener('click', applyManual);
+    cell.querySelector('.confirm-btn').addEventListener('click', function (e) { e.stopPropagation(); applyManual(); });
+    input.addEventListener('click', function (e) { e.stopPropagation(); });
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') applyManual(); });
+    head.addEventListener('click', function () {
+      var wasOpen = cell.classList.contains('open');
+      var gridEl = cell.parentNode;
+      if (gridEl) $all('.core-cell.open', gridEl).forEach(function (x) { x.classList.remove('open'); });
+      if (!wasOpen) cell.classList.add('open');
+    });
 
     function update() {
       var avail = availablePoints(c);
       var val = statVal(s);
-      if (document.activeElement !== input) input.value = val; // non disturbare la digitazione
+      valEl.textContent = val;
+      if (document.activeElement !== input) input.value = val;
       ups.forEach(function (b) { b.disabled = avail <= 0; });
       downs.forEach(function (b) { b.disabled = val <= Store.STAT_MIN; });
     }
 
-    return { el: row, update: update };
+    return { el: cell, update: update };
   }
   function singleFieldDialog(title, label, value, placeholder, onSave) {
     var wrap = document.createElement('div'); wrap.className = 'field';
@@ -1282,6 +1333,7 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       if (!$('#spotlight').hidden) { closeSpotlightByUser(); return; }
+      if (!$('#announce').hidden) { closeAnnounce(); return; }
       if (!$('#ability-overlay').hidden) { closeAbilityOverlay(); return; }
       if (!$('#modal-overlay').hidden) { closeModal(); return; }
       if (currentView && currentView !== 'home') back();
@@ -1467,6 +1519,7 @@
   function addChatMessage(msg) {
     chatMessages.push(msg);
     if (chatMessages.length > 300) chatMessages.shift();
+    maybeAnnounce(msg); // i privati del Master appaiono in evidenza
     if (currentView === 'messages') {
       appendChatNode(msg);
       scrollChatBottom();
@@ -1474,6 +1527,32 @@
       unread++; refreshUnreadUI(); flashBurger();
     }
   }
+
+  function masterMember() { return (netMembers || []).filter(function (m) { return m.role === 'master'; })[0]; }
+  function recipientNames(to) {
+    var ids = Array.isArray(to) ? to : [to];
+    return ids.map(function (id) {
+      var m = (netMembers || []).filter(function (x) { return x.id === id; })[0];
+      return m ? (m.charName || m.name) : '?';
+    }).join(', ');
+  }
+  // Mostra l'annuncio in evidenza se è un messaggio privato ricevuto dal Master
+  function maybeAnnounce(msg) {
+    if (msg.system || !msg.to || msg.to === 'all') return;
+    var myId = Net.status().myId;
+    if (msg.from === myId) return;
+    var gm = masterMember();
+    if (gm && msg.from === gm.id) showAnnounce(msg);
+  }
+  function showAnnounce(msg) {
+    var body = $('#announce-body'); if (!body) return;
+    var html = '';
+    if (msg.text) html += '<p class="ann-text">' + esc(msg.text) + '</p>';
+    if (msg.image) html += '<img class="ann-img" src="' + msg.image + '" alt="immagine" />';
+    body.innerHTML = html || '<p class="ann-text"><i>(messaggio vuoto)</i></p>';
+    $('#announce').hidden = false;
+  }
+  function closeAnnounce() { var a = $('#announce'); if (a) a.hidden = true; }
 
   /* ---- Vista MASTER (plancia) ---- */
   function renderMaster() {
@@ -2048,7 +2127,8 @@
     var node = document.createElement('div');
     node.className = 'msg ' + (mine ? 'mine' : 'theirs');
     var priv = msg.to && msg.to !== 'all';
-    var who = (mine ? 'Tu' : esc(msg.name || 'Anonimo')) + (priv ? ' <span class="priv">· privato</span>' : '');
+    var who = (mine ? 'Tu' : esc(msg.name || 'Anonimo'));
+    if (priv) who += mine ? (' <span class="priv">→ ' + esc(recipientNames(msg.to)) + '</span>') : ' <span class="priv">· privato</span>';
     var html = '<div class="who">' + who + '</div><div class="bubble">';
     if (msg.text) html += esc(msg.text);
     if (msg.image) html += '<img src="' + msg.image + '" alt="immagine" />';
@@ -2062,19 +2142,48 @@
   function scrollChatBottom() { var log = $('#chat-log'); if (log) log.scrollTop = log.scrollHeight; }
 
   function rebuildRecipients() {
-    var sel = $('#chat-to'); if (!sel) return;
+    var btn = $('#chat-to'); if (!btn) return;
     var myId = Net.status().myId;
-    var prev = currentTo;
-    sel.innerHTML = '';
-    function add(val, label) { var o = document.createElement('option'); o.value = val; o.textContent = label; sel.appendChild(o); }
-    add('all', 'Tutti');
-    netMembers.forEach(function (m) {
-      if (m.id === myId) return;
-      add(m.id, m.name + (m.role === 'master' ? ' (Master)' : ''));
+    // tieni solo i destinatari ancora presenti
+    if (Array.isArray(currentTo)) {
+      currentTo = currentTo.filter(function (id) {
+        return (netMembers || []).some(function (m) { return m.id === id && m.id !== myId; });
+      });
+      if (currentTo.length === 0) currentTo = 'all';
+    }
+    btn.textContent = (currentTo === 'all') ? 'Tutti' : recipientNames(currentTo);
+  }
+
+  function openRecipientsDialog() {
+    if (!Net.status().connected) { toast('Non sei collegato a una sessione', 'err'); return; }
+    var myId = Net.status().myId;
+    var others = (netMembers || []).filter(function (m) { return m.id !== myId; });
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+    var allLab = document.createElement('label'); allLab.className = 'chk';
+    allLab.innerHTML = '<input type="checkbox" id="rc-all" /> <b>Tutti</b>';
+    wrap.appendChild(allLab);
+    if (others.length) { var sep = document.createElement('div'); sep.className = 'drawer-sep'; wrap.appendChild(sep); }
+    others.forEach(function (m) {
+      var lab = document.createElement('label'); lab.className = 'chk';
+      var ck = document.createElement('input'); ck.type = 'checkbox'; ck.value = m.id; ck.className = 'rc-m';
+      if (Array.isArray(currentTo) && currentTo.indexOf(m.id) >= 0) ck.checked = true;
+      lab.appendChild(ck);
+      lab.appendChild(document.createTextNode(' ' + (m.charName ? (m.charName + ' (' + m.name + ')') : m.name) + (m.role === 'master' ? ' — Master' : '')));
+      wrap.appendChild(lab);
     });
-    var has = Array.prototype.some.call(sel.options, function (o) { return o.value === prev; });
-    currentTo = has ? prev : 'all';
-    sel.value = currentTo;
+    var allCk = wrap.querySelector('#rc-all');
+    if (currentTo === 'all') allCk.checked = true;
+    allCk.addEventListener('change', function () { if (this.checked) wrap.querySelectorAll('.rc-m').forEach(function (c) { c.checked = false; }); });
+    wrap.querySelectorAll('.rc-m').forEach(function (c) { c.addEventListener('change', function () { if (this.checked) allCk.checked = false; }); });
+    function save() {
+      if (allCk.checked) { currentTo = 'all'; }
+      else {
+        var ids = Array.prototype.slice.call(wrap.querySelectorAll('.rc-m:checked')).map(function (c) { return c.value; });
+        currentTo = ids.length ? ids : 'all';
+      }
+      rebuildRecipients(); closeModal();
+    }
+    openModal({ title: 'Invia a…', bodyNode: wrap, actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Conferma', cls: 'primary', onClick: save }] });
   }
 
   function updateComposerState() {
@@ -2143,7 +2252,9 @@
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendCurrentMessage(); }
   });
   $('#chat-text').addEventListener('input', function () { autoGrow(this); });
-  $('#chat-to').addEventListener('change', function () { currentTo = this.value; });
+  $('#chat-to').addEventListener('click', openRecipientsDialog);
+  $('#announce-close').addEventListener('click', closeAnnounce);
+  $('#announce').addEventListener('click', function (e) { if (e.target === this) closeAnnounce(); });
   $('#chat-attach-btn').addEventListener('click', function () { $('#chat-file').click(); });
   $('#chat-file').addEventListener('change', function (e) {
     var file = e.target.files[0]; e.target.value = '';

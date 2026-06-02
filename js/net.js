@@ -102,7 +102,7 @@
     }
   }
 
-  // Smistamento chat dal punto di vista del master (hub).
+  // Smistamento chat dal punto di vista del master (hub). "to" può essere 'all' o un array di id.
   function routeChat(originId, d) {
     var msg = {
       t: 'chat', id: d.id || uid(), from: originId, name: d.name,
@@ -111,10 +111,12 @@
     if (msg.to === 'all') {
       emit('chat', msg); // il master lo vede
       Object.keys(conns).forEach(function (id) { if (id !== originId) safeSend(conns[id], msg); });
-    } else if (msg.to === peer.id) {
-      emit('chat', msg); // messaggio privato per il master
-    } else if (conns[msg.to]) {
-      safeSend(conns[msg.to], msg); // privato verso un altro player (instradato dal master)
+    } else {
+      var targets = Array.isArray(msg.to) ? msg.to : [msg.to];
+      if (targets.indexOf(peer.id) >= 0) emit('chat', msg); // il master è tra i destinatari
+      targets.forEach(function (id) {
+        if (id !== peer.id && id !== originId && conns[id]) safeSend(conns[id], msg);
+      });
     }
   }
 
@@ -175,7 +177,10 @@
     emit('chat', msg); // mostra subito a chi scrive
     if (role === 'master') {
       if (to === 'all') { Object.keys(conns).forEach(function (id) { safeSend(conns[id], msg); }); }
-      else if (conns[to]) { safeSend(conns[to], msg); }
+      else {
+        var targets = Array.isArray(to) ? to : [to];
+        targets.forEach(function (id) { if (conns[id]) safeSend(conns[id], msg); });
+      }
     } else {
       safeSend(conns.master, msg); // il master fa da hub e instrada
     }
