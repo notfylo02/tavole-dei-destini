@@ -37,11 +37,12 @@
     if (typeof closeDrawer === 'function') closeDrawer(); // chiudi il menu sezioni in ogni navigazione
     if (typeof closeAppDrawer === 'function') closeAppDrawer(); // chiudi il menu app
     if (typeof closeAbilityOverlay === 'function' && typeof aoCtx !== 'undefined' && aoCtx) closeAbilityOverlay();
+    var leaveClass = isBack ? 'leaving-back' : 'leaving';
     $all('.view').forEach(function (v) {
       if (v === next || !v.classList.contains('active')) return;
-      v.classList.add('leaving-back');
+      v.classList.add(leaveClass);
       v.classList.remove('active');
-      setTimeout(function () { v.classList.remove('leaving-back'); }, 450);
+      setTimeout(function () { v.classList.remove('leaving', 'leaving-back'); }, 520);
     });
     next.classList.add('active');
     next.scrollTop = 0;
@@ -172,14 +173,20 @@
       btn.classList.remove('holding'); btn.classList.add('done');
       fill.style.transform = 'scaleX(1)';
       if (navigator.vibrate) { try { navigator.vibrate(40); } catch (e) {} }
+      // zoom "dentro": la home si ingrandisce e sfuma, poi la scelta entra con zoom-in
+      var home = $('#view-home');
+      var choice = $('#view-choice');
+      home.classList.add('warp-out');
       setTimeout(function () {
         navStack = [];
+        choice.classList.add('warp-in'); // aggiunto subito prima di mostrarla, così lo zoom parte da 0
         go('choice');
+        setTimeout(function () { choice.classList.remove('warp-in'); home.classList.remove('warp-out'); }, 700);
         // reset per ritorni futuri
         done = false; btn.classList.remove('done');
         fill.style.transform = 'scaleX(0)';
         hint.textContent = 'tieni premuto per entrare';
-      }, 120);
+      }, 260);
     }
     btn.addEventListener('pointerdown', start);
     btn.addEventListener('pointerup', reset);

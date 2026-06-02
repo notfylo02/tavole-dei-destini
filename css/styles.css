@@ -65,12 +65,27 @@ body {
   padding: max(18px, env(safe-area-inset-top)) 18px 22px;
   max-width: 760px; margin: 0 auto;
   opacity: 0; visibility: hidden; pointer-events: none;
-  transform: translateY(14px) scale(.985);
-  transition: opacity .42s var(--ease), transform .42s var(--ease), visibility .42s;
+  transform: translateY(16px) scale(.94);          /* la pagina entra con uno zoom-in */
+  transform-origin: center 42%;
+  transition: opacity .5s var(--ease), transform .55s var(--ease), visibility .55s;
+  will-change: opacity, transform;
   overflow-y: auto; overflow-x: hidden;
 }
 .view.active { opacity: 1; visibility: visible; pointer-events: auto; transform: none; }
-.view.leaving-back { transform: translateY(14px) scale(.985); opacity: 0; }
+/* uscita in avanti: la pagina "sprofonda" indietro sfumando */
+.view.leaving { opacity: 0; transform: scale(1.06); }
+/* uscita all'indietro: torna verso il basso */
+.view.leaving-back { opacity: 0; transform: translateY(16px) scale(.94); }
+
+/* "Entrare nel programma": la home sfuma ingrandendosi, la scelta entra con uno zoom deciso */
+#view-home.warp-out { animation: warpOut .5s var(--ease) forwards; }
+@keyframes warpOut { to { opacity: 0; transform: scale(1.5); filter: blur(4px); } }
+.view.warp-in { animation: warpIn .65s var(--ease-back) both; }
+@keyframes warpIn {
+  0%   { opacity: 0; transform: scale(.72); filter: blur(8px); }
+  60%  { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: scale(1); filter: blur(0); }
+}
 
 /* ============================================================
    Header
