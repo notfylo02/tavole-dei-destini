@@ -50,9 +50,33 @@ body {
 .stars { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .stars span {
   position: absolute; width: 2px; height: 2px; border-radius: 50%;
-  background: #c9b489; opacity: .25; animation: twinkle linear infinite;
+  background: #d8c79c; opacity: .3; animation: twinkle linear infinite;
+  box-shadow: 0 0 6px rgba(216,182,119,.5);
 }
-@keyframes twinkle { 0%,100%{opacity:.05;transform:scale(.6)} 50%{opacity:.4;transform:scale(1)} }
+@keyframes twinkle { 0%,100%{opacity:.06;transform:scale(.6)} 50%{opacity:.5;transform:scale(1)} }
+
+/* aloni ambientali che derivano lentamente: lo sfondo "respira" */
+.stars::before, .stars::after {
+  content: ''; position: absolute; border-radius: 50%; filter: blur(40px); opacity: .45;
+}
+.stars::before {
+  width: 44vmax; height: 44vmax; left: -14vmax; top: -10vmax;
+  background: radial-gradient(circle, rgba(154,106,46,.24), transparent 70%);
+  animation: drift1 46s ease-in-out infinite alternate;
+}
+.stars::after {
+  width: 40vmax; height: 40vmax; right: -12vmax; bottom: -12vmax;
+  background: radial-gradient(circle, rgba(125,33,27,.2), transparent 70%);
+  animation: drift2 56s ease-in-out infinite alternate;
+}
+@keyframes drift1 { from { transform: translate(0,0); } to { transform: translate(9vmax, 6vmax); } }
+@keyframes drift2 { from { transform: translate(0,0); } to { transform: translate(-8vmax, -6vmax); } }
+
+/* vignettatura morbida ai bordi per dare profondità */
+body::after {
+  content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(125% 100% at 50% 28%, transparent 56%, rgba(0,0,0,.5) 100%);
+}
 
 /* ============================================================
    View system
@@ -99,6 +123,7 @@ body {
   flex: 1; text-align: center; letter-spacing: .5px;
   background: linear-gradient(90deg, var(--accent-3), var(--accent-2));
   -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 1px 8px rgba(216,182,119,.22));
 }
 .head-spacer { width: 44px; }
 .to-menu { flex: none; height: 44px; padding: 0 14px; border-radius: 13px; cursor: pointer;
@@ -251,9 +276,17 @@ body {
   padding: 15px 16px; border-radius: var(--radius-sm);
   border: 1px solid var(--line); background: linear-gradient(150deg, var(--surface-2), var(--surface));
   cursor: pointer; overflow: hidden;
+  box-shadow: inset 0 1px 0 rgba(216,182,119,.06);
   transition: transform .3s var(--ease-back), border-color .25s, box-shadow .25s, background .25s;
   animation: cardin .4s var(--ease) both;
 }
+/* riflesso obliquo che scorre al passaggio/ingresso delle card */
+.card::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(115deg, transparent 40%, rgba(216,182,119,.07) 50%, transparent 60%);
+  transform: translateX(-120%); transition: transform .7s var(--ease);
+}
+.card:hover::after { transform: translateX(120%); }
 @keyframes cardin { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .card:hover { transform: translateY(-2px); border-color: var(--line-strong); box-shadow: var(--shadow); }
 .card:active { transform: scale(.99); }
@@ -395,11 +428,19 @@ body {
 .drawer-sep { height: 1px; background: var(--line); margin: 8px 6px; }
 
 .sheet-panel { flex: 1; padding-bottom: 40px; }
-.panel-in { animation: panelin .35s var(--ease) both; }
-@keyframes panelin { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.panel-in { animation: panelin .5s var(--ease) both; }
+@keyframes panelin {
+  0%   { opacity: 0; transform: translateY(18px) scale(.99); filter: blur(5px); }
+  100% { opacity: 1; transform: none; filter: blur(0); }
+}
 
-.section-head { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 14px; }
-.section-head h3 { font-family: 'Cinzel', serif; font-size: 1.2rem; }
+.section-head { display: flex; align-items: center; justify-content: space-between;
+  margin: 4px 2px 16px; padding-bottom: 10px; border-bottom: 1px solid var(--line); position: relative; }
+.section-head::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 60px; height: 2px;
+  background: linear-gradient(90deg, var(--accent-3), transparent); }
+.section-head h3 { font-family: 'Cinzel', serif; font-size: 1.25rem; letter-spacing: .5px;
+  background: linear-gradient(90deg, var(--accent-3), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
 
 .entry {
   display: flex; align-items: flex-start; gap: 12px; padding: 13px 14px; margin-bottom: 10px;
@@ -595,6 +636,7 @@ body {
   border: 1px solid var(--line); border-radius: var(--radius);
   background: linear-gradient(150deg, var(--surface-2), var(--surface));
   padding: 18px 16px; animation: cardin .4s var(--ease) both;
+  box-shadow: inset 0 1px 0 rgba(216,182,119,.06), 0 8px 24px rgba(0,0,0,.18);
 }
 .panel-card h3 { font-family: 'Cinzel', serif; font-size: 1.1rem; margin-bottom: 6px; color: var(--accent-3); }
 .panel-card p.muted { color: var(--text-dim); font-size: .9rem; line-height: 1.5; }
@@ -749,28 +791,43 @@ body {
 
 /* ---- Spotlight (immagine proiettata dal Master) ---- */
 .spotlight {
-  position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.92);
+  position: fixed; inset: 0; z-index: 100; background: radial-gradient(120% 90% at 50% 50%, rgba(10,7,4,.92), rgba(0,0,0,.97));
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 14px; padding: 20px; animation: fadeIn .3s var(--ease);
+  gap: 14px; padding: 20px; animation: fadeIn .6s var(--ease);
 }
 /* l'attributo hidden deve avere la precedenza sul display:flex qui sopra,
    altrimenti lo spotlight resterebbe sempre visibile bloccando la pagina */
 .spotlight[hidden] { display: none !important; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+/* linea di luce centrale che si espande prima che l'immagine si apra */
+.spotlight::before {
+  content: ''; position: absolute; left: 6%; right: 6%; top: 50%; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent-3), transparent);
+  box-shadow: 0 0 20px 3px var(--glow);
+  transform: translateY(-50%) scaleX(0); transform-origin: center;
+  animation: lineSweep 1.5s var(--ease) both; pointer-events: none;
+}
+@keyframes lineSweep {
+  0%   { opacity: 0; transform: translateY(-50%) scaleX(0); }
+  22%  { opacity: 1; transform: translateY(-50%) scaleX(1); }
+  70%  { opacity: .8; }
+  100% { opacity: 0; }
+}
 .spotlight-img {
   max-width: 100%; max-height: 82vh; border-radius: 10px;
-  box-shadow: 0 20px 70px rgba(0,0,0,.8); border: 1px solid var(--line-strong);
-  animation: revealSplit .6s var(--ease) both;
+  box-shadow: 0 24px 90px rgba(0,0,0,.85), 0 0 50px rgba(0,0,0,.4); border: 1px solid var(--line-strong);
+  animation: revealSplit 1.4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-/* si apre dalla linea centrale verso l'alto e il basso */
+/* si apre lentamente dalla linea centrale verso l'alto e il basso */
 @keyframes revealSplit {
-  0%   { clip-path: inset(50% 0 50% 0); opacity: .5; }
-  100% { clip-path: inset(0 0 0 0); opacity: 1; }
+  0%   { clip-path: inset(50% 0 50% 0); opacity: .35; transform: scale(.985); filter: brightness(.6); }
+  60%  { opacity: 1; filter: brightness(1); }
+  100% { clip-path: inset(0 0 0 0); opacity: 1; transform: scale(1); filter: brightness(1); }
 }
 .spotlight-cap {
   color: var(--text); font-family: 'Cinzel', serif; font-size: 1.15rem; text-align: center;
   text-shadow: 0 2px 10px #000; max-width: 90%;
-  animation: fadeIn .4s var(--ease) .35s both;
+  animation: fadeIn .7s var(--ease) 1s both;
 }
 .spotlight-close {
   position: absolute; top: max(16px, env(safe-area-inset-top)); right: 16px;
