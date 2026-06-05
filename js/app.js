@@ -596,7 +596,8 @@
     $('#sheet-drawer').setAttribute('aria-hidden', 'true');
   }
 
-  $('#sheet-menu-btn').addEventListener('click', openDrawer);
+  // l'hamburger della scheda apre lo STESSO menu completo delle altre sezioni
+  $('#sheet-menu-btn').addEventListener('click', function () { if (typeof openAppDrawer === 'function') openAppDrawer(); });
   $('#drawer-overlay').addEventListener('click', closeDrawer);
   $('#drawer-close').addEventListener('click', closeDrawer);
   $('#drawer-nav').addEventListener('click', function (e) {
@@ -1372,7 +1373,21 @@
     return c;
   }
 
-  /* ---- App drawer (menu di navigazione globale, diverso per ruolo) ---- */
+  /* ---- Menu di navigazione UNICO e COMPLETO (uguale in tutte le sezioni) ---- */
+  var SHEET_SECTIONS = [
+    { sec: 'home', ico: '🏠', label: 'Panoramica' },
+    { sec: 'statistiche', ico: '📊', label: 'Statistiche' },
+    { sec: 'abilita', ico: '✨', label: 'Abilità' },
+    { sec: 'armamenti', ico: '🗡️', label: 'Armamenti' },
+    { sec: 'zaino', ico: '🎒', label: 'Zaino' },
+    { sec: 'combattimento', ico: '🔥', label: 'Combattimento' }
+  ];
+  function goSheetSection(sec) {
+    closeAppDrawer();
+    if (!currentCharId) return;
+    if (currentView !== 'sheet') go('sheet');
+    setSheetSection(sec);
+  }
   function buildAppDrawer() {
     var nav = $('#app-drawer-nav');
     nav.innerHTML = '';
@@ -1380,22 +1395,28 @@
     if (appRole === 'master') {
       items.push({ ico: '🛠️', label: 'Plancia', go: function () { navTo('master'); } });
       items.push({ ico: '🌳', label: 'Abilità', go: function () { navTo('ability-editor'); } });
+      items.push({ sep: true });
       items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
       items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
       items.push({ ico: '🖼️', label: 'Mostra immagine a tutti', go: function () { closeAppDrawer(); pickBroadcastImage(); } });
     } else {
-      items.push({ ico: '🗂️', label: 'Le tue schede', go: function () { navTo('player'); } });
-      var openChar = getChar(currentCharId);
-      if (openChar) {
-        items.push({ ico: '📋', label: 'Scheda: ' + (openChar.nome || 'PG'), go: function () { navTo('sheet'); } });
+      // se una scheda è aperta, le sue sezioni sono raggiungibili da ovunque
+      if (getChar(currentCharId)) {
+        SHEET_SECTIONS.forEach(function (s) {
+          items.push({ ico: s.ico, label: s.label, section: s.sec, go: function () { goSheetSection(s.sec); } });
+        });
+        items.push({ sep: true });
       }
+      items.push({ ico: '🗂️', label: 'Le tue schede', go: function () { navTo('player'); } });
       items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
       items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
       items.push({ ico: '💾', label: 'Dati e backup', go: function () { closeAppDrawer(); openDataMenu(); } });
     }
     items.forEach(function (it) {
+      if (it.sep) { var sp = document.createElement('div'); sp.className = 'drawer-sep'; nav.appendChild(sp); return; }
       var b = document.createElement('button');
-      b.className = 'drawer-item';
+      var isActive = it.section && currentView === 'sheet' && currentSection === it.section;
+      b.className = 'drawer-item' + (isActive ? ' active' : '');
       b.innerHTML = '<span class="tab-ico">' + it.ico + '</span>' + esc(it.label);
       if (it.badge && unread > 0) {
         var d = document.createElement('span'); d.className = 'unread-dot';
