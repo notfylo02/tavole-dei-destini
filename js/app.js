@@ -621,7 +621,7 @@
       case 'home': panel.innerHTML = ''; panel.appendChild(viewSheetHome(c)); break;
       case 'statistiche': panel.innerHTML = ''; panel.appendChild(viewStatistiche(c)); break;
       case 'abilita': panel.innerHTML = ''; panel.appendChild(viewAbilita(c)); break;
-      case 'armamenti': panel.innerHTML = ''; panel.appendChild(viewList(c, 'armamenti', 'Armamenti', '🗡️', 'Nuovo armamento')); break;
+      case 'armamenti': panel.innerHTML = ''; panel.appendChild(viewArmamenti(c)); break;
       case 'zaino': panel.innerHTML = ''; panel.appendChild(viewZaino(c)); break;
       case 'combattimento': panel.innerHTML = ''; panel.appendChild(viewCombattimento(c)); break;
     }
@@ -1172,6 +1172,146 @@
     return frag;
   }
 
+  /* ---- Armamenti / Equipaggiamento ---- */
+  function eqOf(c) {
+    if (!c.sheet.armamenti || Array.isArray(c.sheet.armamenti)) c.sheet.armamenti = Store.normalizeEquip(c.sheet.armamenti);
+    return c.sheet.armamenti;
+  }
+  function isMagicWeapon(tipo) { return Store.WEAPON_CAT.magiche.indexOf(tipo) >= 0; }
+  function weaponOptions(selected) {
+    function grp(label, arr) {
+      return '<optgroup label="' + label + '">' + arr.map(function (w) {
+        return '<option' + (w === selected ? ' selected' : '') + '>' + esc(w) + '</option>';
+      }).join('') + '</optgroup>';
+    }
+    return '<option value="">— tipo —</option>' + grp('Fisiche', Store.WEAPON_CAT.fisiche) + grp('Magiche', Store.WEAPON_CAT.magiche);
+  }
+  function equipSubhead(text, onAdd, addLabel) {
+    var h = document.createElement('div'); h.className = 'equip-subhead';
+    h.innerHTML = '<h4>' + text + '</h4>';
+    if (onAdd) { var b = btn(addLabel || '＋', '', onAdd); b.classList.add('equip-add'); h.appendChild(b); }
+    return h;
+  }
+  // card di uno slot singolo (armatura/elmo/accessorio): pieno o vuoto
+  function slotCard(ico, mainText, subText, onClick, onRemove) {
+    var e = document.createElement('div'); e.className = 'entry equip-slot' + (mainText ? '' : ' empty-slot');
+    e.innerHTML = '<span class="eq-ico">' + ico + '</span>' +
+      '<div class="e-main"><div class="e-name">' + (mainText ? esc(mainText) : '<span class="muted">vuoto — tocca per equipaggiare</span>') + '</div>' +
+      (subText ? '<div class="e-sub">' + esc(subText) + '</div>' : '') + '</div>' +
+      (mainText ? '<button class="e-del" title="Rimuovi">×</button>' : '<span class="chev">＋</span>');
+    e.addEventListener('click', onClick);
+    var del = e.querySelector('.e-del');
+    if (del) del.addEventListener('click', function (ev) { ev.stopPropagation(); onRemove(); });
+    return e;
+  }
+
+  function viewArmamenti(c) {
+    var eq = eqOf(c);
+    var frag = document.createElement('div');
+    frag.appendChild(sectionHead('Armamenti'));
+
+    // ARMI
+    frag.appendChild(equipSubhead('⚔️ Armi', function () { weaponDialog(c, null); }, '＋ Arma'));
+    if (eq.weapons.length === 0) frag.appendChild(emptyHint('Nessuna arma. Aggiungine una scegliendo il tipo dal catalogo.'));
+    eq.weapons.forEach(function (w) {
+      var e = document.createElement('div'); e.className = 'entry';
+      e.innerHTML = '<span class="eq-ico">' + (isMagicWeapon(w.tipo) ? '🔮' : '🗡️') + '</span>' +
+        '<div class="e-main"><div class="e-name">' + esc(w.name || w.tipo || 'Arma') + '</div>' +
+        '<div class="e-sub">' + (w.tipo ? '<span class="eq-tag">' + esc(w.tipo) + '</span> ' : '') + (w.desc ? esc(w.desc) : '') + '</div></div>' +
+        '<button class="e-del" title="Rimuovi">×</button>';
+      e.querySelector('.e-del').addEventListener('click', function (ev) {
+        ev.stopPropagation(); eq.weapons = eq.weapons.filter(function (x) { return x.id !== w.id; }); persist(); renderSection();
+      });
+      e.addEventListener('click', function () { weaponDialog(c, w); });
+      frag.appendChild(e);
+    });
+
+    // ARMATURA (1 slot + classe)
+    frag.appendChild(equipSubhead('🛡️ Armatura'));
+    frag.appendChild(slotCard('🛡️',
+      eq.armor ? ((eq.armor.classe ? '[' + eq.armor.classe + '] ' : '') + (eq.armor.name || 'Armatura')) : null,
+      eq.armor && eq.armor.desc, function () { armorDialog(c); }, function () { eq.armor = null; persist(); renderSection(); }));
+
+    // ELMO (1 slot)
+    frag.appendChild(equipSubhead('⛑️ Elmo'));
+    frag.appendChild(slotCard('⛑️', eq.elmo ? (eq.elmo.name || 'Elmo') : null, eq.elmo && eq.elmo.desc,
+      function () { slotDialog('Elmo', eq.elmo, function (v) { eq.elmo = v; persist(); renderSection(); }); },
+      function () { eq.elmo = null; persist(); renderSection(); }));
+
+    // ACCESSORI (slot fissi)
+    frag.appendChild(equipSubhead('💍 Accessori'));
+    [['ring1', 'Anello 1', '💍'], ['ring2', 'Anello 2', '💍'], ['collana', 'Collana', '📿'], ['extra', 'Extra', '✨']].forEach(function (a) {
+      var key = a[0], label = a[1], ico = a[2]; var cur = eq.accessori[key];
+      frag.appendChild(slotCard(ico, cur ? (cur.name || label) : null, cur && cur.desc,
+        function () { slotDialog(label, eq.accessori[key], function (v) { eq.accessori[key] = v; persist(); renderSection(); }); },
+        function () { eq.accessori[key] = null; persist(); renderSection(); }));
+    });
+
+    return frag;
+  }
+
+  function weaponDialog(c, w) {
+    var eq = eqOf(c);
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    wrap.innerHTML =
+      '<div class="field"><label>Tipo (dal catalogo)</label><select id="w-tipo" class="eq-select">' + weaponOptions(w ? w.tipo : '') + '</select></div>' +
+      '<div class="field"><label>Nome</label><input id="w-name" maxlength="40" placeholder="Es. Lama del Crepuscolo" /></div>' +
+      '<div class="field"><label>Note</label><textarea id="w-desc" rows="3" maxlength="500" placeholder="Effetti, danni, regole..."></textarea></div>';
+    wrap.querySelector('#w-name').value = w ? w.name : '';
+    wrap.querySelector('#w-desc').value = w ? w.desc : '';
+    function save() {
+      var tipo = wrap.querySelector('#w-tipo').value;
+      var name = wrap.querySelector('#w-name').value.trim();
+      var desc = wrap.querySelector('#w-desc').value.trim();
+      if (!tipo && !name) { toast('Scegli un tipo o scrivi un nome', 'err'); return; }
+      if (w) { w.tipo = tipo; w.name = name; w.desc = desc; }
+      else eq.weapons.push({ id: Store.genId(), tipo: tipo, name: name, desc: desc });
+      persist(); closeModal(); renderSection();
+    }
+    openModal({ title: w ? 'Modifica arma' : 'Nuova arma', bodyNode: wrap, focus: '#w-name',
+      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
+  }
+
+  function armorDialog(c) {
+    var eq = eqOf(c); var cur = eq.armor || {};
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    wrap.innerHTML =
+      '<div class="field"><label>Classe</label><select id="a-classe" class="eq-select"><option value="">— classe —</option>' +
+      Store.ARMOR_CLASSES.map(function (k) { return '<option' + (k === cur.classe ? ' selected' : '') + '>' + esc(k) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label>Nome</label><input id="a-name" maxlength="40" placeholder="Es. Corazza del Drago" /></div>' +
+      '<div class="field"><label>Note</label><textarea id="a-desc" rows="3" maxlength="500"></textarea></div>';
+    wrap.querySelector('#a-name').value = cur.name || '';
+    wrap.querySelector('#a-desc').value = cur.desc || '';
+    function save() {
+      var classe = wrap.querySelector('#a-classe').value;
+      var name = wrap.querySelector('#a-name').value.trim();
+      var desc = wrap.querySelector('#a-desc').value.trim();
+      if (!classe && !name) { toast('Scegli una classe o scrivi un nome', 'err'); return; }
+      eq.armor = { classe: classe, name: name, desc: desc };
+      persist(); closeModal(); renderSection();
+    }
+    openModal({ title: 'Armatura', bodyNode: wrap, focus: '#a-name',
+      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
+  }
+
+  // dialog generico per slot nome+note (elmo, accessori). onSave riceve {name,desc} o null.
+  function slotDialog(title, cur, onSave) {
+    cur = cur || {};
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    wrap.innerHTML = '<div class="field"><label>Nome</label><input id="s-name" maxlength="40" /></div>' +
+      '<div class="field"><label>Note</label><textarea id="s-desc" rows="3" maxlength="500"></textarea></div>';
+    wrap.querySelector('#s-name').value = cur.name || '';
+    wrap.querySelector('#s-desc').value = cur.desc || '';
+    function save() {
+      var name = wrap.querySelector('#s-name').value.trim();
+      var desc = wrap.querySelector('#s-desc').value.trim();
+      onSave((!name && !desc) ? null : { name: name, desc: desc });
+      closeModal();
+    }
+    openModal({ title: title, bodyNode: wrap, focus: '#s-name',
+      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
+  }
+
   /* ---- Zaino (nome + quantità + descrizione) ---- */
   function viewZaino(c) {
     var frag = document.createElement('div');
@@ -1497,6 +1637,7 @@
     Net.on('tree-push', function (d) { applyIncomingTree(d.tree); });
     Net.on('tree-unlock', function (d) { applyUnlock(d.treeId, d.nodeId, d.unlocked); });
     Net.on('points-grant', function (d) { applyPointsGrant(d.amount); });
+    Net.on('equip-push', function (d) { applyIncomingEquip(d.item); });
     Net.on('tree-progress', function (d) {
       masterProgress[d.from] = d;
       if (currentView === 'ability-editor') renderAbilityEditor();
@@ -1526,6 +1667,30 @@
     node.unlocked = !!unlocked; persist();
     toast(unlocked ? '🔓 Un nodo abilità è stato sbloccato!' : 'Un nodo abilità è stato bloccato');
     refreshAbilitaIfOpen();
+  }
+  function applyIncomingEquip(item) {
+    var c = activeChar();
+    if (!c) { toast('Scegli una scheda in Sessione per ricevere equipaggiamento', 'err'); return; }
+    if (!item || typeof item !== 'object') return;
+    var eq = eqOf(c);
+    if (item.kind === 'weapon') {
+      eq.weapons.push({ id: Store.genId(), tipo: item.tipo || '', name: item.name || '', desc: item.desc || '' });
+    } else if (item.kind === 'armor') {
+      eq.armor = { classe: item.classe || '', name: item.name || '', desc: item.desc || '' };
+    } else if (item.kind === 'elmo') {
+      eq.elmo = { name: item.name || '', desc: item.desc || '' };
+    } else if (item.kind === 'accessory') {
+      var val = { name: item.name || '', desc: item.desc || '' };
+      if (item.slot && eq.accessori.hasOwnProperty(item.slot)) eq.accessori[item.slot] = val;
+      else {
+        var order = ['ring1', 'ring2', 'extra', 'collana'], placed = false;
+        for (var i = 0; i < order.length; i++) { if (!eq.accessori[order[i]]) { eq.accessori[order[i]] = val; placed = true; break; } }
+        if (!placed) eq.accessori.extra = val;
+      }
+    }
+    persist();
+    toast('🎒 Equipaggiamento ricevuto dal Master', 'ok');
+    if (currentView === 'sheet' && currentSection === 'armamenti') renderSection();
   }
   function applyPointsGrant(amount) {
     var c = activeChar();
@@ -1653,6 +1818,9 @@
         var gb = document.createElement('button'); gb.className = 'tool-btn member-pts'; gb.textContent = '＋ punti';
         gb.addEventListener('click', function () { grantPointsDialog(m.id); });
         row.appendChild(gb);
+        var eb = document.createElement('button'); eb.className = 'tool-btn member-pts'; eb.textContent = '🎒'; eb.title = 'Invia equipaggiamento';
+        eb.addEventListener('click', function () { sendEquipDialog(m.id); });
+        row.appendChild(eb);
       }
       list.appendChild(row);
     });
@@ -2071,6 +2239,41 @@
       var ok = Net.grantPoints(memberId, n);
       toast(ok ? ('Concessi ' + n + ' punti') : 'Giocatore non collegato', ok ? 'ok' : 'err');
     });
+  }
+
+  // Master → giocatore: comporre e inviare un pezzo di equipaggiamento
+  function sendEquipDialog(memberId) {
+    if (!memberId) { toast('Giocatore non valido', 'err'); return; }
+    if (typeof Net === 'undefined' || !Net.status().connected) { toast('Avvia prima la sessione', 'err'); return; }
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    wrap.innerHTML =
+      '<div class="field"><label>Tipo di oggetto</label><select id="se-kind" class="eq-select">' +
+        '<option value="weapon">Arma</option><option value="armor">Armatura</option><option value="elmo">Elmo</option><option value="accessory">Accessorio</option></select></div>' +
+      '<div class="field" id="se-tipo-wrap"><label>Tipo arma</label><select id="se-tipo" class="eq-select">' + weaponOptions('') + '</select></div>' +
+      '<div class="field" id="se-classe-wrap" style="display:none"><label>Classe armatura</label><select id="se-classe" class="eq-select"><option value="">— classe —</option>' + Store.ARMOR_CLASSES.map(function (k) { return '<option>' + esc(k) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field" id="se-slot-wrap" style="display:none"><label>Slot accessorio</label><select id="se-slot" class="eq-select"><option value="">primo libero</option><option value="ring1">Anello 1</option><option value="ring2">Anello 2</option><option value="collana">Collana</option><option value="extra">Extra</option></select></div>' +
+      '<div class="field"><label>Nome</label><input id="se-name" maxlength="40" /></div>' +
+      '<div class="field"><label>Note</label><textarea id="se-desc" rows="3" maxlength="500"></textarea></div>';
+    var kind = wrap.querySelector('#se-kind');
+    function sync() {
+      wrap.querySelector('#se-tipo-wrap').style.display = kind.value === 'weapon' ? '' : 'none';
+      wrap.querySelector('#se-classe-wrap').style.display = kind.value === 'armor' ? '' : 'none';
+      wrap.querySelector('#se-slot-wrap').style.display = kind.value === 'accessory' ? '' : 'none';
+    }
+    kind.addEventListener('change', sync); sync();
+    function send() {
+      var k = kind.value;
+      var item = { kind: k, name: wrap.querySelector('#se-name').value.trim(), desc: wrap.querySelector('#se-desc').value.trim() };
+      if (k === 'weapon') item.tipo = wrap.querySelector('#se-tipo').value;
+      if (k === 'armor') item.classe = wrap.querySelector('#se-classe').value;
+      if (k === 'accessory') item.slot = wrap.querySelector('#se-slot').value;
+      if (!item.name && !item.tipo && !item.classe) { toast('Indica almeno un nome o un tipo', 'err'); return; }
+      var ok = Net.pushEquip(memberId, item);
+      toast(ok ? 'Equipaggiamento inviato' : 'Giocatore non collegato', ok ? 'ok' : 'err');
+      closeModal();
+    }
+    openModal({ title: 'Invia equipaggiamento', bodyNode: wrap, focus: '#se-name',
+      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Invia', cls: 'primary', onClick: send }] });
   }
 
   function editNodeDialog(ability, node) {

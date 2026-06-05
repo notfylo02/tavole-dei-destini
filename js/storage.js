@@ -65,9 +65,40 @@
       abilita: [],                  // alberi abilità: [ tree ] (vedi normalizeTree)
       abilityPoints: 0,             // punti abilità non spesi (concessi dal Master)
       abilityRanks: {},             // progressi: { [treeId]: { [nodeId]: rank } }
-      armamenti: [],                // { id, name, desc }
+      armamenti: normalizeEquip({}),// equipaggiamento: { weapons, armor, elmo, accessori }
       zaino: [],                    // { id, name, qty, desc }
       combattimento: ''             // testo libero (note di combattimento)
+    };
+  }
+
+  /* ---------- Equipaggiamento (Armamenti) ---------- */
+  // Cataloghi canonici (come le 9 stat: definiti dal gioco)
+  var WEAPON_CAT = {
+    fisiche: ['Tirapugni', 'Guanti corazzati', 'Pugnale', 'Falcetto', 'Spada', 'Balestrino', 'Balestra', 'Stocco', 'Frusta', 'Archibugio', 'Scimitarra', 'Arco lungo', 'Arco', 'Pistola', 'Chackram', 'Ascia', 'Ascia a due mani', 'Spadone', 'Mazza', 'Martello da guerra', 'Alabarda', 'Cannone'],
+    magiche: ['Staffa', 'Bacchetta', 'Falce', 'Libro', 'Rituale', 'Sfera di cristallo', 'Teschio Arcano', 'Incensiere', 'Famigli', 'Bastone runico']
+  };
+  var ARMOR_CLASSES = ['Leggera', 'Media', 'Pesante'];
+
+  function slotItem(o) {
+    if (!o || typeof o !== 'object') return null;
+    if (!o.name && !o.desc) return null;
+    return { name: typeof o.name === 'string' ? o.name : '', desc: typeof o.desc === 'string' ? o.desc : '' };
+  }
+  function normalizeEquip(e) {
+    // migrazione: vecchio armamenti era un array piatto [{name,desc}] -> diventano armi
+    var weaponsFromArray = null;
+    if (Array.isArray(e)) { weaponsFromArray = e; e = {}; }
+    e = (e && typeof e === 'object') ? e : {};
+    var weapons = Array.isArray(e.weapons) ? e.weapons : (weaponsFromArray || []);
+    var acc = (e.accessori && typeof e.accessori === 'object') ? e.accessori : {};
+    return {
+      weapons: weapons.filter(function (w) { return w && (w.name || w.desc || w.tipo); }).map(function (w) {
+        return { id: w.id || genId(), tipo: typeof w.tipo === 'string' ? w.tipo : '', name: typeof w.name === 'string' ? w.name : '', desc: typeof w.desc === 'string' ? w.desc : '' };
+      }),
+      armor: (e.armor && typeof e.armor === 'object' && (e.armor.name || e.armor.desc || e.armor.classe))
+        ? { classe: typeof e.armor.classe === 'string' ? e.armor.classe : '', name: e.armor.name || '', desc: e.armor.desc || '' } : null,
+      elmo: slotItem(e.elmo),
+      accessori: { ring1: slotItem(acc.ring1), ring2: slotItem(acc.ring2), collana: slotItem(acc.collana), extra: slotItem(acc.extra) }
     };
   }
 
@@ -206,7 +237,7 @@
     base.abilita = migrateAbilita(sheet.abilita);
     base.abilityPoints = Math.max(0, parseInt(sheet.abilityPoints, 10) || 0);
     base.abilityRanks = (sheet.abilityRanks && typeof sheet.abilityRanks === 'object') ? sheet.abilityRanks : {};
-    base.armamenti = Array.isArray(sheet.armamenti) ? sheet.armamenti : [];
+    base.armamenti = normalizeEquip(sheet.armamenti);
     base.zaino = Array.isArray(sheet.zaino) ? sheet.zaino : [];
     base.combattimento = typeof sheet.combattimento === 'string' ? sheet.combattimento : '';
     ensureCoreStats(base);
@@ -285,6 +316,9 @@
     normalizeClass: normalizeClass,
     normalizeNode: normalizeNode,
     normalizeLink: normalizeLink,
+    normalizeEquip: normalizeEquip,
+    WEAPON_CAT: WEAPON_CAT,
+    ARMOR_CLASSES: ARMOR_CLASSES,
     genId: genId,
     load: load,
     save: save,

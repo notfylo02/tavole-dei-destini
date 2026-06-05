@@ -166,6 +166,7 @@
     else if (d.t === 'tree-push') { emit('tree-push', { tree: d.tree }); }
     else if (d.t === 'tree-unlock') { emit('tree-unlock', { treeId: d.treeId, nodeId: d.nodeId, unlocked: !!d.unlocked }); }
     else if (d.t === 'points-grant') { emit('points-grant', { amount: d.amount }); }
+    else if (d.t === 'equip-push') { emit('equip-push', { item: d.item }); }
   }
 
   /* ===================== INVIO (condiviso) ===================== */
@@ -204,6 +205,12 @@
   function grantPoints(memberId, amount) {
     if (role !== 'master') return false;
     if (conns[memberId]) { safeSend(conns[memberId], { t: 'points-grant', amount: amount }); return true; }
+    return false;
+  }
+  // Master → un giocatore: invia un pezzo di equipaggiamento.
+  function pushEquip(memberId, item) {
+    if (role !== 'master') return false;
+    if (conns[memberId]) { safeSend(conns[memberId], { t: 'equip-push', item: item }); return true; }
     return false;
   }
   // Player → master: comunica il personaggio attivo + livello (mostrati nella lista membri).
@@ -269,7 +276,7 @@
   var Net = {
     on: on, host: host, join: join, sendChat: sendChat,
     broadcastImage: broadcastImage, closeImage: closeImage,
-    pushTree: pushTree, unlockNode: unlockNode, grantPoints: grantPoints,
+    pushTree: pushTree, unlockNode: unlockNode, grantPoints: grantPoints, pushEquip: pushEquip,
     whoami: whoami, sendProgress: sendProgress,
     leave: leave, status: status, available: available, myId: myId
   };
