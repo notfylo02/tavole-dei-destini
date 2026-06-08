@@ -23,6 +23,7 @@
   var playerMode = null;        // null | 'move' | 'delete'
   var currentCharId = null;
   var currentSection = 'statistiche';
+  var armSubpage = null;        // Armamenti: null=hub | 'weapons' | 'armor' | 'elmo' | 'accessory'
   var appRole = 'player';       // 'master' | 'player' — ruolo corrente (per menu e sessione)
   var activeCharId = null;      // PG con cui il giocatore è in sessione (riceve abilità/punti)
   var editingClassId = null;    // classe aperta nell'editor master
@@ -575,6 +576,7 @@
 
   function setSheetSection(name) {
     currentSection = name;
+    if (name === 'armamenti') armSubpage = null; // entrando dal menu si parte dall'hub
     $all('.drawer-item').forEach(function (it) {
       it.classList.toggle('active', it.getAttribute('data-section') === name);
     });
@@ -808,8 +810,7 @@
           '<button class="step-btn" data-step="1" aria-label="+1">+</button>' +
           '<button class="step-btn big" data-step="5" aria-label="+5">++</button>' +
         '</div>' +
-        '<div class="cc-bonus"><span class="cc-bonus-lbl">Bonus</span>' +
-          '<p class="muted">I bonus di questa statistica appariranno qui.</p></div>' +
+        '<div class="cc-bonus"><span class="cc-bonus-lbl">Bonus equipaggiamento</span>' + statBonusHtml(c, s) + '</div>' +
       '</div>';
 
     var head = cell.querySelector('.cc-head');
@@ -1172,143 +1173,300 @@
     return frag;
   }
 
-  /* ---- Armamenti / Equipaggiamento ---- */
-  function eqOf(c) {
-    if (!c.sheet.armamenti || Array.isArray(c.sheet.armamenti)) c.sheet.armamenti = Store.normalizeEquip(c.sheet.armamenti);
-    return c.sheet.armamenti;
+  /* ============================================================
+     ARMAMENTI / EQUIPAGGIAMENTO
+     ============================================================ */
+  var ARM_CATS = [
+    { key: 'weapons', cats: ['weapon', 'shield'], ico: '⚔️', label: 'Armi e scudi' },
+    { key: 'armor', cats: ['armor'], ico: '🛡️', label: 'Armature' },
+    { key: 'elmo', cats: ['elmo'], ico: '⛑️', label: 'Elmi' },
+    { key: 'accessory', cats: ['accessory'], ico: '💍', label: 'Accessori' }
+  ];
+  function eqItems(c) {
+    if (!c.sheet.armamenti || Array.isArray(c.sheet.armamenti) || !c.sheet.armamenti.items) c.sheet.armamenti = Store.normalizeEquip(c.sheet.armamenti);
+    return c.sheet.armamenti.items;
   }
-  function isMagicWeapon(tipo) { return Store.WEAPON_CAT.magiche.indexOf(tipo) >= 0; }
-  function weaponOptions(selected) {
-    function grp(label, arr) {
-      return '<optgroup label="' + label + '">' + arr.map(function (w) {
-        return '<option' + (w === selected ? ' selected' : '') + '>' + esc(w) + '</option>';
-      }).join('') + '</optgroup>';
+  function itemsByCat(c, cats) { var arr = Array.isArray(cats) ? cats : [cats]; return eqItems(c).filter(function (it) { return arr.indexOf(it.cat) >= 0; }); }
+  function handsUsed(c) { return itemsByCat(c, ['weapon', 'shield']).filter(function (i) { return i.equipped; }).reduce(function (t, i) { return t + (i.hands || 1); }, 0); }
+  function equippedCount(c, cat) { return itemsByCat(c, cat).filter(function (i) { return i.equipped; }).length; }
+  function equippedAcc(c, accType) { return itemsByCat(c, 'accessory').filter(function (i) { return i.equipped && i.accType === accType; }).length; }
+  function accDisplay(t) { return t === 'ring' ? 'Anello' : (t === 'collana' ? 'Collana' : 'Extra'); }
+  function itemDefaultName(it) { return it.tipo || ({ weapon: 'Arma', shield: 'Scudo', armor: 'Armatura', elmo: 'Elmo', accessory: 'Accessorio' }[it.cat] || 'Oggetto'); }
+
+  function canEquip(c, it) {
+    if (it.equipped) return true;
+    if (it.cat === 'weapon' || it.cat === 'shield') return handsUsed(c) + (it.hands || 1) <= 2;
+    if (it.cat === 'armor' || it.cat === 'elmo') return true; // sostituisce l'altro
+    if (it.cat === 'accessory') return equippedAcc(c, it.accType) < (it.accType === 'ring' ? 2 : 1);
+    return true;
+  }
+  function toggleEquip(c, it) {
+    if (it.equipped) { it.equipped = false; persist(); renderSection(); refreshAbilitaIfOpen(); return; }
+    if (!canEquip(c, it)) {
+      if (it.cat === 'weapon' || it.cat === 'shield') toast('Mani occupate (max 2)', 'err');
+      else if (it.cat === 'accessory') toast('Slot ' + accDisplay(it.accType) + ' al massimo', 'err');
+      return;
     }
-    return '<option value="">— tipo —</option>' + grp('Fisiche', Store.WEAPON_CAT.fisiche) + grp('Magiche', Store.WEAPON_CAT.magiche);
+    if (it.cat === 'armor' || it.cat === 'elmo') itemsByCat(c, it.cat).forEach(function (o) { o.equipped = false; });
+    it.equipped = true; persist(); renderSection(); refreshAbilitaIfOpen();
   }
-  function equipSubhead(text, onAdd, addLabel) {
-    var h = document.createElement('div'); h.className = 'equip-subhead';
-    h.innerHTML = '<h4>' + text + '</h4>';
-    if (onAdd) { var b = btn(addLabel || '＋', '', onAdd); b.classList.add('equip-add'); h.appendChild(b); }
-    return h;
+
+  // contributi dei boost degli oggetti equipaggiati per una statistica (abbr)
+  function boostsForStat(c, abbr) {
+    var out = [];
+    eqItems(c).forEach(function (it) {
+      if (!it.equipped) return;
+      (it.boosts || []).forEach(function (b) { if (b.stat === abbr && b.amount) out.push({ name: it.name || itemDefaultName(it), amount: b.amount }); });
+    });
+    return out;
   }
-  // card di uno slot singolo (armatura/elmo/accessorio): pieno o vuoto
-  function slotCard(ico, mainText, subText, onClick, onRemove) {
-    var e = document.createElement('div'); e.className = 'entry equip-slot' + (mainText ? '' : ' empty-slot');
-    e.innerHTML = '<span class="eq-ico">' + ico + '</span>' +
-      '<div class="e-main"><div class="e-name">' + (mainText ? esc(mainText) : '<span class="muted">vuoto — tocca per equipaggiare</span>') + '</div>' +
-      (subText ? '<div class="e-sub">' + esc(subText) + '</div>' : '') + '</div>' +
-      (mainText ? '<button class="e-del" title="Rimuovi">×</button>' : '<span class="chev">＋</span>');
-    e.addEventListener('click', onClick);
-    var del = e.querySelector('.e-del');
-    if (del) del.addEventListener('click', function (ev) { ev.stopPropagation(); onRemove(); });
-    return e;
+  // HTML dei bonus equipaggiamento per il dettaglio di una statistica
+  function statBonusHtml(c, s) {
+    var contribs = boostsForStat(c, s.abbr || s.id);
+    if (!contribs.length) return '<p class="muted">Nessun bonus dagli oggetti equipaggiati.</p>';
+    var total = contribs.reduce(function (t, x) { return t + x.amount; }, 0);
+    var base = statVal(s);
+    var rows = contribs.map(function (x) {
+      return '<div class="bn-row"><span>' + esc(x.name) + '</span><span class="bn-amt">' + (x.amount >= 0 ? '+' : '') + x.amount + '</span></div>';
+    }).join('');
+    return rows +
+      '<div class="bn-row bn-total"><span>Totale</span><span class="bn-amt">' + (total >= 0 ? '+' : '') + total + '</span></div>' +
+      '<div class="bn-eff">Valore effettivo: <b>' + (base + total) + '</b></div>';
+  }
+
+  function statOptions(selected, withNone) {
+    var o = withNone ? '<option value="">— nessuna —</option>' : '<option value="">— stat —</option>';
+    o += Store.STAT_DEFS.map(function (d) { return '<option value="' + d.abbr + '"' + (d.abbr === selected ? ' selected' : '') + '>' + d.abbr + ' — ' + esc(d.name) + '</option>'; }).join('');
+    return o;
+  }
+  function weaponTypeOptions(magic, selected) {
+    var arr = magic ? Store.WEAPON_CAT.magiche : Store.WEAPON_CAT.fisiche;
+    return '<option value="">— tipo —</option>' + arr.map(function (w) { return '<option' + (w === selected ? ' selected' : '') + '>' + esc(w) + '</option>'; }).join('');
   }
 
   function viewArmamenti(c) {
-    var eq = eqOf(c);
+    eqItems(c); // normalizza
     var frag = document.createElement('div');
-    frag.appendChild(sectionHead('Armamenti'));
 
-    // ARMI
-    frag.appendChild(equipSubhead('⚔️ Armi', function () { weaponDialog(c, null); }, '＋ Arma'));
-    if (eq.weapons.length === 0) frag.appendChild(emptyHint('Nessuna arma. Aggiungine una scegliendo il tipo dal catalogo.'));
-    eq.weapons.forEach(function (w) {
-      var e = document.createElement('div'); e.className = 'entry';
-      e.innerHTML = '<span class="eq-ico">' + (isMagicWeapon(w.tipo) ? '🔮' : '🗡️') + '</span>' +
-        '<div class="e-main"><div class="e-name">' + esc(w.name || w.tipo || 'Arma') + '</div>' +
-        '<div class="e-sub">' + (w.tipo ? '<span class="eq-tag">' + esc(w.tipo) + '</span> ' : '') + (w.desc ? esc(w.desc) : '') + '</div></div>' +
-        '<button class="e-del" title="Rimuovi">×</button>';
-      e.querySelector('.e-del').addEventListener('click', function (ev) {
-        ev.stopPropagation(); eq.weapons = eq.weapons.filter(function (x) { return x.id !== w.id; }); persist(); renderSection();
+    if (!armSubpage) {
+      frag.appendChild(sectionHead('Armamenti'));
+      var hint = document.createElement('p'); hint.className = 'muted'; hint.style.cssText = 'margin:0 2px 6px;font-size:.86rem;';
+      hint.textContent = 'Ottieni bonus e abilità solo dagli oggetti equipaggiati.';
+      frag.appendChild(hint);
+      var grid = document.createElement('div'); grid.className = 'home-nav';
+      ARM_CATS.forEach(function (cfg) {
+        var all = itemsByCat(c, cfg.cats);
+        var eqd = all.filter(function (i) { return i.equipped; }).length;
+        var b = document.createElement('button'); b.className = 'home-btn';
+        b.innerHTML = '<span class="hb-ico">' + cfg.ico + '</span><span class="hb-lbl">' + cfg.label + '</span>' +
+          '<span class="hb-sub">' + eqd + ' equip. · ' + all.length + ' tot</span>';
+        b.addEventListener('click', function () { armSubpage = cfg.key; renderSection(); });
+        grid.appendChild(b);
       });
-      e.addEventListener('click', function () { weaponDialog(c, w); });
-      frag.appendChild(e);
-    });
+      frag.appendChild(grid);
+      return frag;
+    }
 
-    // ARMATURA (1 slot + classe)
-    frag.appendChild(equipSubhead('🛡️ Armatura'));
-    frag.appendChild(slotCard('🛡️',
-      eq.armor ? ((eq.armor.classe ? '[' + eq.armor.classe + '] ' : '') + (eq.armor.name || 'Armatura')) : null,
-      eq.armor && eq.armor.desc, function () { armorDialog(c); }, function () { eq.armor = null; persist(); renderSection(); }));
+    var cfg = ARM_CATS.filter(function (x) { return x.key === armSubpage; })[0] || ARM_CATS[0];
+    var head = document.createElement('div'); head.className = 'section-head';
+    head.innerHTML = '<h3>' + cfg.ico + ' ' + esc(cfg.label) + '</h3>';
+    head.appendChild(btn('‹ Armamenti', '', function () { armSubpage = null; renderSection(); }));
+    frag.appendChild(head);
 
-    // ELMO (1 slot)
-    frag.appendChild(equipSubhead('⛑️ Elmo'));
-    frag.appendChild(slotCard('⛑️', eq.elmo ? (eq.elmo.name || 'Elmo') : null, eq.elmo && eq.elmo.desc,
-      function () { slotDialog('Elmo', eq.elmo, function (v) { eq.elmo = v; persist(); renderSection(); }); },
-      function () { eq.elmo = null; persist(); renderSection(); }));
+    var cap = document.createElement('div'); cap.className = 'equip-cap'; cap.innerHTML = capacityText(c, cfg.key);
+    frag.appendChild(cap);
 
-    // ACCESSORI (slot fissi)
-    frag.appendChild(equipSubhead('💍 Accessori'));
-    [['ring1', 'Anello 1', '💍'], ['ring2', 'Anello 2', '💍'], ['collana', 'Collana', '📿'], ['extra', 'Extra', '✨']].forEach(function (a) {
-      var key = a[0], label = a[1], ico = a[2]; var cur = eq.accessori[key];
-      frag.appendChild(slotCard(ico, cur ? (cur.name || label) : null, cur && cur.desc,
-        function () { slotDialog(label, eq.accessori[key], function (v) { eq.accessori[key] = v; persist(); renderSection(); }); },
-        function () { eq.accessori[key] = null; persist(); renderSection(); }));
-    });
+    var create = btn('＋ Crea', 'primary', function () { createItemFlow(c, cfg.key); });
+    create.classList.add('equip-create');
+    frag.appendChild(create);
 
+    var list = itemsByCat(c, cfg.cats);
+    if (list.length === 0) frag.appendChild(emptyHint('Niente qui. Crea il tuo primo oggetto con "Crea".'));
+    list.forEach(function (it) { frag.appendChild(itemCard(c, it)); });
     return frag;
   }
 
-  function weaponDialog(c, w) {
-    var eq = eqOf(c);
-    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
-    wrap.innerHTML =
-      '<div class="field"><label>Tipo (dal catalogo)</label><select id="w-tipo" class="eq-select">' + weaponOptions(w ? w.tipo : '') + '</select></div>' +
-      '<div class="field"><label>Nome</label><input id="w-name" maxlength="40" placeholder="Es. Lama del Crepuscolo" /></div>' +
-      '<div class="field"><label>Note</label><textarea id="w-desc" rows="3" maxlength="500" placeholder="Effetti, danni, regole..."></textarea></div>';
-    wrap.querySelector('#w-name').value = w ? w.name : '';
-    wrap.querySelector('#w-desc').value = w ? w.desc : '';
-    function save() {
-      var tipo = wrap.querySelector('#w-tipo').value;
-      var name = wrap.querySelector('#w-name').value.trim();
-      var desc = wrap.querySelector('#w-desc').value.trim();
-      if (!tipo && !name) { toast('Scegli un tipo o scrivi un nome', 'err'); return; }
-      if (w) { w.tipo = tipo; w.name = name; w.desc = desc; }
-      else eq.weapons.push({ id: Store.genId(), tipo: tipo, name: name, desc: desc });
-      persist(); closeModal(); renderSection();
-    }
-    openModal({ title: w ? 'Modifica arma' : 'Nuova arma', bodyNode: wrap, focus: '#w-name',
-      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
+  function capacityText(c, key) {
+    if (key === 'weapons') return '<span class="cap-chip">✋ Mani ' + handsUsed(c) + '/2</span>';
+    if (key === 'armor') return '<span class="cap-chip">Equipaggiata ' + equippedCount(c, 'armor') + '/1</span>';
+    if (key === 'elmo') return '<span class="cap-chip">Equipaggiato ' + equippedCount(c, 'elmo') + '/1</span>';
+    if (key === 'accessory') return '<span class="cap-chip">Anelli ' + equippedAcc(c, 'ring') + '/2</span><span class="cap-chip">Collana ' + equippedAcc(c, 'collana') + '/1</span><span class="cap-chip">Extra ' + equippedAcc(c, 'extra') + '/1</span>';
+    return '';
   }
 
-  function armorDialog(c) {
-    var eq = eqOf(c); var cur = eq.armor || {};
-    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
-    wrap.innerHTML =
-      '<div class="field"><label>Classe</label><select id="a-classe" class="eq-select"><option value="">— classe —</option>' +
-      Store.ARMOR_CLASSES.map(function (k) { return '<option' + (k === cur.classe ? ' selected' : '') + '>' + esc(k) + '</option>'; }).join('') + '</select></div>' +
-      '<div class="field"><label>Nome</label><input id="a-name" maxlength="40" placeholder="Es. Corazza del Drago" /></div>' +
-      '<div class="field"><label>Note</label><textarea id="a-desc" rows="3" maxlength="500"></textarea></div>';
-    wrap.querySelector('#a-name').value = cur.name || '';
-    wrap.querySelector('#a-desc').value = cur.desc || '';
-    function save() {
-      var classe = wrap.querySelector('#a-classe').value;
-      var name = wrap.querySelector('#a-name').value.trim();
-      var desc = wrap.querySelector('#a-desc').value.trim();
-      if (!classe && !name) { toast('Scegli una classe o scrivi un nome', 'err'); return; }
-      eq.armor = { classe: classe, name: name, desc: desc };
-      persist(); closeModal(); renderSection();
-    }
-    openModal({ title: 'Armatura', bodyNode: wrap, focus: '#a-name',
-      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
+  function itemMeta(it) {
+    var bits = [];
+    if (it.cat === 'weapon' || it.cat === 'shield') {
+      if (it.tipo) bits.push('<span class="eq-tag">' + esc(it.tipo) + '</span>');
+      else if (it.cat === 'shield') bits.push('<span class="eq-tag">Scudo</span>');
+      bits.push((it.hands === 2 ? '2 mani' : '1 mano'));
+      if (it.dmgBase || it.scaleStat) bits.push('💥 ' + (it.dmgBase || 0) + (it.scaleStat ? ' + ' + esc(it.scaleStat) + '/2' : ''));
+    } else if (it.cat === 'armor') { if (it.classe) bits.push('<span class="eq-tag">' + esc(it.classe) + '</span>'); }
+    else if (it.cat === 'elmo') { if (it.hp) bits.push('❤️ +' + it.hp + ' HP'); }
+    else if (it.cat === 'accessory') { bits.push('<span class="eq-tag">' + accDisplay(it.accType) + '</span>'); }
+    if (it.boosts && it.boosts.length) bits.push(it.boosts.map(function (b) { return (b.amount >= 0 ? '+' : '') + b.amount + ' ' + esc(b.stat); }).join(', '));
+    if (it.abilities && it.abilities.length) bits.push('🎯 ' + it.abilities.length + ' abilità');
+    return bits.join(' · ');
   }
 
-  // dialog generico per slot nome+note (elmo, accessori). onSave riceve {name,desc} o null.
-  function slotDialog(title, cur, onSave) {
-    cur = cur || {};
-    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
-    wrap.innerHTML = '<div class="field"><label>Nome</label><input id="s-name" maxlength="40" /></div>' +
-      '<div class="field"><label>Note</label><textarea id="s-desc" rows="3" maxlength="500"></textarea></div>';
-    wrap.querySelector('#s-name').value = cur.name || '';
-    wrap.querySelector('#s-desc').value = cur.desc || '';
-    function save() {
-      var name = wrap.querySelector('#s-name').value.trim();
-      var desc = wrap.querySelector('#s-desc').value.trim();
-      onSave((!name && !desc) ? null : { name: name, desc: desc });
-      closeModal();
+  function itemCard(c, it) {
+    var e = document.createElement('div'); e.className = 'entry item-card' + (it.equipped ? ' equipped' : '');
+    e.innerHTML =
+      '<button class="eq-star" title="Equipaggia" aria-label="Equipaggia">' + (it.equipped ? '★' : '☆') + '</button>' +
+      '<div class="e-main"><div class="e-name">' + esc(it.name || itemDefaultName(it)) + '</div>' +
+      '<div class="e-sub">' + itemMeta(it) + '</div></div>' +
+      '<button class="ic-edit" title="Modifica" aria-label="Modifica">✎</button>' +
+      '<button class="e-del" title="Rimuovi" aria-label="Rimuovi">×</button>';
+    e.querySelector('.eq-star').addEventListener('click', function (ev) { ev.stopPropagation(); toggleEquip(c, it); });
+    e.querySelector('.ic-edit').addEventListener('click', function (ev) { ev.stopPropagation(); itemDialog(c, it, { cat: it.cat, magic: it.magic }); });
+    e.querySelector('.e-del').addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      c.sheet.armamenti.items = eqItems(c).filter(function (x) { return x.id !== it.id; });
+      persist(); renderSection(); refreshAbilitaIfOpen();
+    });
+    e.addEventListener('click', function () { itemDialog(c, it, { cat: it.cat, magic: it.magic }); });
+    return e;
+  }
+
+  // scelta iniziale per "Armi e scudi", poi apre il form
+  function createItemFlow(c, key) {
+    if (key === 'weapons') {
+      var wrap = document.createElement('div'); wrap.className = 'choice-cards';
+      function choiceBtn(label, ico, onPick) {
+        var b = document.createElement('button'); b.className = 'choice-mini';
+        b.innerHTML = '<span class="cm-ico">' + ico + '</span>' + label;
+        b.addEventListener('click', function () { closeModal(); onPick(); });
+        return b;
+      }
+      wrap.appendChild(choiceBtn('Arma Fisica', '🗡️', function () { itemDialog(c, null, { cat: 'weapon', magic: false }); }));
+      wrap.appendChild(choiceBtn('Arma Magica', '🔮', function () { itemDialog(c, null, { cat: 'weapon', magic: true }); }));
+      wrap.appendChild(choiceBtn('Scudo', '🛡️', function () { itemDialog(c, null, { cat: 'shield', magic: false }); }));
+      openModal({ title: 'Cosa vuoi creare?', bodyNode: wrap, actions: [{ label: 'Annulla', onClick: closeModal }] });
+    } else if (key === 'armor') itemDialog(c, null, { cat: 'armor' });
+    else if (key === 'elmo') itemDialog(c, null, { cat: 'elmo' });
+    else if (key === 'accessory') itemDialog(c, null, { cat: 'accessory' });
+  }
+
+  // editor riusabile dei boost (max 6) — opera su un array locale
+  function buildBoostEditor(boosts) {
+    var box = document.createElement('div');
+    var list = document.createElement('div'); list.className = 'boost-list';
+    var addBtn = btn('＋ Boost', '', function () { if (boosts.length >= 6) { toast('Massimo 6 boost', 'err'); return; } boosts.push({ stat: '', amount: 1 }); render(); });
+    addBtn.classList.add('mini-add');
+    function render() {
+      list.innerHTML = '';
+      boosts.forEach(function (b, i) {
+        var row = document.createElement('div'); row.className = 'boost-row';
+        row.innerHTML = '<select class="eq-select b-stat">' + statOptions(b.stat, false) + '</select>' +
+          '<input class="b-amt" type="number" inputmode="numeric" value="' + (b.amount || 0) + '" />' +
+          '<button class="b-del" aria-label="Rimuovi">×</button>';
+        row.querySelector('.b-stat').addEventListener('change', function () { b.stat = this.value; });
+        row.querySelector('.b-amt').addEventListener('input', function () { b.amount = parseInt(this.value, 10) || 0; });
+        row.querySelector('.b-del').addEventListener('click', function () { boosts.splice(i, 1); render(); });
+        list.appendChild(row);
+      });
+      addBtn.disabled = boosts.length >= 6;
     }
-    openModal({ title: title, bodyNode: wrap, focus: '#s-name',
+    render();
+    box.appendChild(list); box.appendChild(addBtn);
+    return box;
+  }
+  // editor riusabile delle abilità dell'oggetto — opera su un array locale
+  function buildAbilityEditor(abilities) {
+    var box = document.createElement('div');
+    var list = document.createElement('div'); list.className = 'iab-list';
+    var addBtn = btn('＋ Crea abilità', '', function () { abilities.push({ id: Store.genId(), name: '', note: '', countdown: 0 }); render(); });
+    addBtn.classList.add('mini-add');
+    function render() {
+      list.innerHTML = '';
+      abilities.forEach(function (a, i) {
+        var blk = document.createElement('div'); blk.className = 'iab-block';
+        blk.innerHTML =
+          '<div class="iab-row"><input class="iab-name" maxlength="40" placeholder="Nome abilità" />' +
+          '<button class="iab-del" aria-label="Rimuovi">×</button></div>' +
+          '<textarea class="iab-note" rows="2" maxlength="400" placeholder="Cosa fa..."></textarea>' +
+          '<div class="iab-cd"><label>Countdown turni (vuoto = ripetibile)</label><input class="iab-cdv" type="number" inputmode="numeric" min="0" /></div>';
+        blk.querySelector('.iab-name').value = a.name || '';
+        blk.querySelector('.iab-note').value = a.note || '';
+        blk.querySelector('.iab-cdv').value = a.countdown ? a.countdown : '';
+        blk.querySelector('.iab-name').addEventListener('input', function () { a.name = this.value; });
+        blk.querySelector('.iab-note').addEventListener('input', function () { a.note = this.value; });
+        blk.querySelector('.iab-cdv').addEventListener('input', function () { a.countdown = Math.max(0, parseInt(this.value, 10) || 0); });
+        blk.querySelector('.iab-del').addEventListener('click', function () { abilities.splice(i, 1); render(); });
+        list.appendChild(blk);
+      });
+    }
+    render();
+    box.appendChild(list); box.appendChild(addBtn);
+    return box;
+  }
+
+  // dialog unico di creazione/modifica oggetto
+  function itemDialog(c, item, opts) {
+    opts = opts || {};
+    var cat = item ? item.cat : opts.cat;
+    var magic = item ? !!item.magic : !!opts.magic;
+    var editing = !!item;
+    var boosts = (item ? item.boosts : []).map(function (b) { return { stat: b.stat, amount: b.amount }; });
+    var abilities = (item ? item.abilities : []).map(function (a) { return { id: a.id, name: a.name, note: a.note, countdown: a.countdown }; });
+
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    var html = '<div class="field"><label>Nome</label><input id="it-name" maxlength="40" /></div>';
+    if (cat === 'weapon') {
+      html += '<div class="field"><label>Tipo (' + (magic ? 'magiche' : 'fisiche') + ')</label><select id="it-tipo" class="eq-select">' + weaponTypeOptions(magic, item ? item.tipo : '') + '</select></div>';
+    }
+    if (cat === 'weapon' || cat === 'shield') {
+      html += '<div class="field-row">' +
+        '<div class="field"><label>Danni base</label><input id="it-dmg" type="number" inputmode="numeric" min="0" placeholder="0" /></div>' +
+        '<div class="field"><label>Scala su</label><select id="it-scale" class="eq-select">' + statOptions(item ? item.scaleStat : '', true) + '</select></div>' +
+        '</div>';
+    }
+    if (cat === 'armor') {
+      html += '<div class="field"><label>Classe</label><select id="it-classe" class="eq-select"><option value="">— classe —</option>' +
+        Store.ARMOR_CLASSES.map(function (k) { return '<option' + (item && item.classe === k ? ' selected' : '') + '>' + esc(k) + '</option>'; }).join('') + '</select></div>';
+    }
+    if (cat === 'elmo') {
+      html += '<div class="field"><label>HP aggiunti</label><input id="it-hp" type="number" inputmode="numeric" min="0" placeholder="0" /></div>';
+    }
+    if (cat === 'accessory') {
+      html += '<div class="field"><label>Tipo accessorio</label><select id="it-acc" class="eq-select">' +
+        ['ring', 'collana', 'extra'].map(function (t) { return '<option value="' + t + '"' + (item && item.accType === t ? ' selected' : '') + '>' + accDisplay(t) + '</option>'; }).join('') + '</select></div>';
+    }
+    html += '<div class="field"><label>Note</label><textarea id="it-note" rows="2" maxlength="500" placeholder="Dettagli..."></textarea></div>' +
+      '<div class="field"><label>Boost statistiche (max 6)</label><div id="it-boosts"></div></div>' +
+      '<div class="field"><label>Abilità (pulsanti nella sezione Fight)</label><div id="it-abil"></div></div>';
+    wrap.innerHTML = html;
+    wrap.querySelector('#it-name').value = item ? item.name : '';
+    wrap.querySelector('#it-note').value = item ? item.note : '';
+    if (cat === 'weapon' || cat === 'shield') wrap.querySelector('#it-dmg').value = item && item.dmgBase ? item.dmgBase : '';
+    if (cat === 'elmo') wrap.querySelector('#it-hp').value = item && item.hp ? item.hp : '';
+    wrap.querySelector('#it-boosts').appendChild(buildBoostEditor(boosts));
+    wrap.querySelector('#it-abil').appendChild(buildAbilityEditor(abilities));
+
+    function save() {
+      var data = {
+        id: item ? item.id : undefined, cat: cat, magic: magic,
+        name: wrap.querySelector('#it-name').value.trim(),
+        note: wrap.querySelector('#it-note').value.trim(),
+        boosts: boosts, abilities: abilities,
+        equipped: item ? item.equipped : false
+      };
+      if (cat === 'weapon') { data.tipo = wrap.querySelector('#it-tipo').value; data.hands = Store.weaponHands(data.tipo); }
+      if (cat === 'weapon' || cat === 'shield') { data.dmgBase = parseInt(wrap.querySelector('#it-dmg').value, 10) || 0; data.scaleStat = wrap.querySelector('#it-scale').value; }
+      if (cat === 'armor') data.classe = wrap.querySelector('#it-classe').value;
+      if (cat === 'elmo') data.hp = parseInt(wrap.querySelector('#it-hp').value, 10) || 0;
+      if (cat === 'accessory') data.accType = wrap.querySelector('#it-acc').value;
+      if (!data.name && !data.tipo && cat !== 'armor' && cat !== 'elmo' && cat !== 'accessory') { toast('Dai un nome o un tipo', 'err'); return; }
+      if (!data.name && (cat === 'armor' || cat === 'elmo' || cat === 'accessory' || cat === 'shield')) { wrap.querySelector('#it-name').focus(); toast('Dai un nome', 'err'); return; }
+      var nn = Store.normalizeItem(data);
+      if (item) {
+        var i = eqItems(c).map(function (x) { return x.id; }).indexOf(item.id);
+        nn.equipped = item.equipped; eqItems(c)[i] = nn;
+      } else { eqItems(c).push(nn); }
+      persist(); closeModal(); renderSection(); refreshAbilitaIfOpen();
+    }
+    var titleMap = { weapon: magic ? 'Arma magica' : 'Arma fisica', shield: 'Scudo', armor: 'Armatura', elmo: 'Elmo', accessory: 'Accessorio' };
+    openModal({ title: (editing ? 'Modifica ' : 'Nuovo: ') + (titleMap[cat] || 'Oggetto'), bodyNode: wrap, focus: '#it-name',
       actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
   }
 
@@ -1672,22 +1830,15 @@
     var c = activeChar();
     if (!c) { toast('Scegli una scheda in Sessione per ricevere equipaggiamento', 'err'); return; }
     if (!item || typeof item !== 'object') return;
-    var eq = eqOf(c);
-    if (item.kind === 'weapon') {
-      eq.weapons.push({ id: Store.genId(), tipo: item.tipo || '', name: item.name || '', desc: item.desc || '' });
-    } else if (item.kind === 'armor') {
-      eq.armor = { classe: item.classe || '', name: item.name || '', desc: item.desc || '' };
-    } else if (item.kind === 'elmo') {
-      eq.elmo = { name: item.name || '', desc: item.desc || '' };
-    } else if (item.kind === 'accessory') {
-      var val = { name: item.name || '', desc: item.desc || '' };
-      if (item.slot && eq.accessori.hasOwnProperty(item.slot)) eq.accessori[item.slot] = val;
-      else {
-        var order = ['ring1', 'ring2', 'extra', 'collana'], placed = false;
-        for (var i = 0; i < order.length; i++) { if (!eq.accessori[order[i]]) { eq.accessori[order[i]] = val; placed = true; break; } }
-        if (!placed) eq.accessori.extra = val;
-      }
-    }
+    var kind = item.kind || item.cat || 'weapon';
+    var data = { name: item.name || '', note: item.desc || item.note || '' };
+    if (kind === 'weapon') { data.cat = 'weapon'; data.tipo = item.tipo || ''; data.magic = Store.WEAPON_CAT.magiche.indexOf(data.tipo) >= 0; }
+    else if (kind === 'shield') { data.cat = 'shield'; }
+    else if (kind === 'armor') { data.cat = 'armor'; data.classe = item.classe || ''; }
+    else if (kind === 'elmo') { data.cat = 'elmo'; data.hp = item.hp || 0; }
+    else if (kind === 'accessory') { data.cat = 'accessory'; var slot = item.slot || ''; data.accType = (slot === 'collana') ? 'collana' : (slot === 'extra' ? 'extra' : 'ring'); }
+    else { data.cat = 'weapon'; }
+    eqItems(c).push(Store.normalizeItem(data)); // arriva NON equipaggiato
     persist();
     toast('🎒 Equipaggiamento ricevuto dal Master', 'ok');
     if (currentView === 'sheet' && currentSection === 'armamenti') renderSection();

@@ -78,28 +78,73 @@
     magiche: ['Staffa', 'Bacchetta', 'Falce', 'Libro', 'Rituale', 'Sfera di cristallo', 'Teschio Arcano', 'Incensiere', 'Famigli', 'Bastone runico']
   };
   var ARMOR_CLASSES = ['Leggera', 'Media', 'Pesante'];
+  // Armi che occupano due mani (le altre una sola). Modificabile.
+  var WEAPON_2H = ['Balestra', 'Arco lungo', 'Archibugio', 'Ascia a due mani', 'Spadone', 'Martello da guerra', 'Alabarda', 'Cannone', 'Falce', 'Bastone runico'];
+  function weaponHands(tipo) { return WEAPON_2H.indexOf(tipo) >= 0 ? 2 : 1; }
+  var ITEM_CATS = ['weapon', 'shield', 'armor', 'elmo', 'accessory'];
 
-  function slotItem(o) {
-    if (!o || typeof o !== 'object') return null;
-    if (!o.name && !o.desc) return null;
-    return { name: typeof o.name === 'string' ? o.name : '', desc: typeof o.desc === 'string' ? o.desc : '' };
+  function intOr0(v) { var n = parseInt(v, 10); return isNaN(n) ? 0 : n; }
+  function normalizeBoosts(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(function (b) { return b && b.stat; })
+      .slice(0, 6)
+      .map(function (b) { return { stat: String(b.stat), amount: intOr0(b.amount) }; });
   }
-  function normalizeEquip(e) {
-    // migrazione: vecchio armamenti era un array piatto [{name,desc}] -> diventano armi
-    var weaponsFromArray = null;
-    if (Array.isArray(e)) { weaponsFromArray = e; e = {}; }
-    e = (e && typeof e === 'object') ? e : {};
-    var weapons = Array.isArray(e.weapons) ? e.weapons : (weaponsFromArray || []);
-    var acc = (e.accessori && typeof e.accessori === 'object') ? e.accessori : {};
-    return {
-      weapons: weapons.filter(function (w) { return w && (w.name || w.desc || w.tipo); }).map(function (w) {
-        return { id: w.id || genId(), tipo: typeof w.tipo === 'string' ? w.tipo : '', name: typeof w.name === 'string' ? w.name : '', desc: typeof w.desc === 'string' ? w.desc : '' };
-      }),
-      armor: (e.armor && typeof e.armor === 'object' && (e.armor.name || e.armor.desc || e.armor.classe))
-        ? { classe: typeof e.armor.classe === 'string' ? e.armor.classe : '', name: e.armor.name || '', desc: e.armor.desc || '' } : null,
-      elmo: slotItem(e.elmo),
-      accessori: { ring1: slotItem(acc.ring1), ring2: slotItem(acc.ring2), collana: slotItem(acc.collana), extra: slotItem(acc.extra) }
+  function normalizeItemAbilities(arr) {
+    if (!Array.isArray(arr)) return [];
+    return arr.filter(function (a) { return a && (a.name || a.note); }).map(function (a) {
+      return { id: a.id || genId(), name: typeof a.name === 'string' ? a.name : '', note: typeof a.note === 'string' ? a.note : '', countdown: Math.max(0, intOr0(a.countdown)) };
+    });
+  }
+  function normalizeItem(it) {
+    it = it || {};
+    var cat = ITEM_CATS.indexOf(it.cat) >= 0 ? it.cat : 'weapon';
+    var n = {
+      id: it.id || genId(),
+      cat: cat,
+      name: typeof it.name === 'string' ? it.name : '',
+      note: typeof it.note === 'string' ? it.note : '',
+      boosts: normalizeBoosts(it.boosts),
+      abilities: normalizeItemAbilities(it.abilities),
+      equipped: !!it.equipped
     };
+    if (cat === 'weapon' || cat === 'shield') {
+      n.magic = !!it.magic;
+      n.tipo = typeof it.tipo === 'string' ? it.tipo : '';
+      n.hands = (cat === 'shield') ? 1 : (it.hands === 2 ? 2 : (it.hands === 1 ? 1 : weaponHands(n.tipo)));
+      n.dmgBase = Math.max(0, intOr0(it.dmgBase));
+      n.scaleStat = typeof it.scaleStat === 'string' ? it.scaleStat : '';
+    } else if (cat === 'armor') {
+      n.classe = typeof it.classe === 'string' ? it.classe : '';
+    } else if (cat === 'elmo') {
+      n.hp = Math.max(0, intOr0(it.hp));
+    } else if (cat === 'accessory') {
+      n.accType = (['ring', 'collana', 'extra'].indexOf(it.accType) >= 0) ? it.accType : 'ring';
+    }
+    return n;
+  }
+
+  function normalizeEquip(e) {
+    var items = [];
+    if (Array.isArray(e)) {
+      // formato più vecchio: array piatto [{name,desc}] -> armi
+      e.forEach(function (w) { if (w && (w.name || w.desc || w.tipo)) items.push(normalizeItem({ cat: 'weapon', tipo: w.tipo, name: w.name, note: w.desc })); });
+    } else if (e && typeof e === 'object') {
+      if (Array.isArray(e.items)) {
+        // formato nuovo
+        items = e.items.map(normalizeItem);
+      } else {
+        // formato precedente {weapons, armor, elmo, accessori} -> items
+        (e.weapons || []).forEach(function (w) { if (w && (w.name || w.desc || w.tipo)) items.push(normalizeItem({ cat: 'weapon', tipo: w.tipo, name: w.name, note: w.desc })); });
+        if (e.armor && (e.armor.name || e.armor.desc || e.armor.classe)) items.push(normalizeItem({ cat: 'armor', classe: e.armor.classe, name: e.armor.name, note: e.armor.desc }));
+        if (e.elmo && (e.elmo.name || e.elmo.desc)) items.push(normalizeItem({ cat: 'elmo', name: e.elmo.name, note: e.elmo.desc }));
+        var acc = e.accessori || {};
+        [['ring1', 'ring'], ['ring2', 'ring'], ['collana', 'collana'], ['extra', 'extra']].forEach(function (a) {
+          var o = acc[a[0]]; if (o && (o.name || o.desc)) items.push(normalizeItem({ cat: 'accessory', accType: a[1], name: o.name, note: o.desc }));
+        });
+      }
+    }
+    return { items: items };
   }
 
   /* ---------- Abilità ad albero ---------- */
@@ -317,8 +362,11 @@
     normalizeNode: normalizeNode,
     normalizeLink: normalizeLink,
     normalizeEquip: normalizeEquip,
+    normalizeItem: normalizeItem,
     WEAPON_CAT: WEAPON_CAT,
     ARMOR_CLASSES: ARMOR_CLASSES,
+    WEAPON_2H: WEAPON_2H,
+    weaponHands: weaponHands,
     genId: genId,
     load: load,
     save: save,

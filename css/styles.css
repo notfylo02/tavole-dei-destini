@@ -763,6 +763,60 @@ body::after {
 .eq-select { width: 100%; padding: 10px 12px; border-radius: var(--radius-sm);
   border: 1px solid var(--line); background: var(--surface); color: var(--text); font-family: inherit; font-size: .95rem; }
 
+/* hub: sottotitolo conteggio nei pulsanti */
+.home-btn .hb-sub { font-size: .72rem; color: var(--text-faint); margin-top: 2px; }
+/* riga capacità */
+.equip-cap { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 2px 12px; }
+.cap-chip { font-size: .75rem; font-weight: 700; color: var(--accent-3); background: var(--surface-3);
+  border: 1px solid var(--line-strong); border-radius: 20px; padding: 4px 12px; }
+.equip-create { margin: 0 2px 12px !important; }
+/* card oggetto con stella di equip */
+.item-card { align-items: center; }
+.item-card.equipped { border-color: var(--accent-2); background: linear-gradient(150deg, #2a1d10, var(--surface)); box-shadow: 0 0 14px var(--glow); }
+.item-card .eq-star { flex: none; width: 40px; height: 40px; border: none; background: none; cursor: pointer;
+  font-size: 1.5rem; color: var(--text-faint); line-height: 1; transition: transform .15s var(--ease-back), color .2s; }
+.item-card.equipped .eq-star { color: var(--accent-3); text-shadow: 0 0 10px var(--glow); }
+.item-card .eq-star:active { transform: scale(.85); }
+.item-card .ic-edit { flex: none; width: 36px; height: 36px; border: none; background: none; cursor: pointer;
+  color: var(--text-faint); font-size: 1.1rem; transition: color .2s; }
+.item-card .ic-edit:hover { color: var(--accent-3); }
+
+/* scelta Fisica/Magica/Scudo */
+.choice-cards { display: flex; flex-direction: column; gap: 10px; }
+.choice-mini { display: flex; align-items: center; gap: 12px; padding: 16px 14px; cursor: pointer; font-family: inherit;
+  font-size: 1.05rem; font-weight: 600; color: var(--text); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: linear-gradient(150deg, var(--surface-2), var(--surface)); transition: transform .15s var(--ease-back), border-color .2s; }
+.choice-mini:hover { border-color: var(--accent-2); }
+.choice-mini:active { transform: scale(.97); }
+.choice-mini .cm-ico { font-size: 1.5rem; }
+
+/* mini-editor boost e abilità nel modale */
+.mini-add { margin-top: 8px; padding: 6px 12px !important; font-size: .85rem; }
+.boost-list { display: flex; flex-direction: column; gap: 8px; }
+.boost-row { display: flex; gap: 8px; align-items: center; }
+.boost-row .b-stat { flex: 1; min-width: 0; }
+.boost-row .b-amt { width: 70px; flex: none; padding: 9px 8px; text-align: center; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); font-family: inherit; }
+.boost-row .b-del, .iab-row .iab-del { flex: none; width: 34px; height: 34px; border: none; background: var(--surface-3);
+  color: var(--blood-2); border-radius: var(--radius-sm); cursor: pointer; font-size: 1.1rem; }
+.iab-list { display: flex; flex-direction: column; gap: 10px; }
+.iab-block { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; background: var(--surface);
+  display: flex; flex-direction: column; gap: 8px; }
+.iab-row { display: flex; gap: 8px; align-items: center; }
+.iab-name { flex: 1; min-width: 0; padding: 9px 10px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text); font-family: inherit; }
+.iab-note { resize: none; padding: 9px 10px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text); font-family: inherit; font-size: .9rem; }
+.iab-cd label { font-size: .76rem; color: var(--text-dim); display: block; margin-bottom: 3px; }
+.iab-cd .iab-cdv { width: 90px; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text); font-family: inherit; text-align: center; }
+
+/* bonus nel dettaglio statistica */
+.cc-bonus .bn-row { display: flex; justify-content: space-between; font-size: .88rem; padding: 3px 0; color: var(--text-dim); }
+.cc-bonus .bn-amt { color: var(--accent-3); font-weight: 700; }
+.cc-bonus .bn-total { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; color: var(--text); font-weight: 600; }
+.cc-bonus .bn-eff { margin-top: 6px; font-size: .92rem; }
+
 /* ============================================================
    Animazioni di ingresso (cascata) per le sezioni
    ============================================================ */
