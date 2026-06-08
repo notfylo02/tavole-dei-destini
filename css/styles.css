@@ -770,6 +770,29 @@ body::after {
 .cap-chip { font-size: .75rem; font-weight: 700; color: var(--accent-3); background: var(--surface-3);
   border: 1px solid var(--line-strong); border-radius: 20px; padding: 4px 12px; }
 .equip-create { margin: 0 2px 12px !important; }
+
+/* slot di equipaggiamento (quadrati) */
+.eq-slots { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 2px 14px; }
+.eq-slot { position: relative; flex: 1 1 calc(50% - 5px); min-width: 130px; aspect-ratio: 1 / 1; max-height: 132px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center;
+  border-radius: var(--radius); cursor: pointer; font-family: inherit; padding: 8px;
+  transition: transform .15s var(--ease-back), border-color .2s, box-shadow .25s; }
+.eq-slot.wide { flex-basis: 100%; aspect-ratio: auto; min-height: 84px; }
+.eq-slot.empty { border: 2px dashed var(--line-strong); background: rgba(255,255,255,.015); color: var(--text-faint); }
+.eq-slot.empty:hover { border-color: var(--accent-2); color: var(--accent-3); }
+.eq-slot.empty .es-plus { font-size: 1.9rem; line-height: 1; opacity: .8; }
+.eq-slot.empty .es-lbl { font-size: .78rem; font-weight: 600; letter-spacing: .02em; }
+.eq-slot.full { border: 1px solid var(--accent-2); background: linear-gradient(155deg, #2c1e10, var(--surface));
+  box-shadow: 0 0 16px var(--glow); color: var(--text); padding: 10px; }
+.eq-slot.full:active { transform: scale(.96); }
+.eq-slot .es-name { font-weight: 700; font-size: .96rem; line-height: 1.15; }
+.eq-slot .es-meta { font-size: .76rem; color: var(--accent-3); font-weight: 600; }
+.eq-slot .es-x { position: absolute; top: 6px; right: 8px; font-size: .85rem; color: var(--text-faint); opacity: .7; }
+.eq-slot.full:hover .es-x { color: var(--blood-2); opacity: 1; }
+.eq-own-lbl { font-size: .8rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-dim); margin: 2px 2px 8px; }
+.modal-opt .mo-meta { display: block; font-size: .76rem; color: var(--text-dim); font-weight: 500; margin-top: 2px; }
+
 /* card oggetto con stella di equip */
 .item-card { align-items: center; }
 .item-card.equipped { border-color: var(--accent-2); background: linear-gradient(150deg, #2a1d10, var(--surface)); box-shadow: 0 0 14px var(--glow); }
@@ -807,9 +830,16 @@ body::after {
   background: var(--bg-2); color: var(--text); font-family: inherit; }
 .iab-note { resize: none; padding: 9px 10px; border-radius: var(--radius-sm); border: 1px solid var(--line);
   background: var(--bg-2); color: var(--text); font-family: inherit; font-size: .9rem; }
-.iab-cd label { font-size: .76rem; color: var(--text-dim); display: block; margin-bottom: 3px; }
+.iab-cd label, .iab-eff label { font-size: .76rem; color: var(--text-dim); display: block; margin-bottom: 3px; }
 .iab-cd .iab-cdv { width: 90px; padding: 8px; border-radius: var(--radius-sm); border: 1px solid var(--line);
   background: var(--bg-2); color: var(--text); font-family: inherit; text-align: center; }
+.iab-eff { display: flex; flex-direction: column; gap: 6px; }
+.iab-eff-row { display: flex; gap: 8px; }
+.iab-eff .iab-val { width: 110px; flex: none; padding: 9px 10px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text); font-family: inherit; text-align: center; }
+.iab-eff .iab-scale { flex: 1; min-width: 0; }
+.iab-eff .iab-etext { flex: 1; min-width: 0; padding: 9px 10px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: var(--bg-2); color: var(--text); font-family: inherit; }
 
 /* bonus nel dettaglio statistica */
 .cc-bonus .bn-row { display: flex; justify-content: space-between; font-size: .88rem; padding: 3px 0; color: var(--text-dim); }

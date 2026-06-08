@@ -88,13 +88,17 @@
   /* ============================================================
      MODALE
      ============================================================ */
+  var modalCloseTimer = null;
   function closeModal() {
     var ov = $('#modal-overlay');
     ov.classList.add('closing');
-    setTimeout(function () { ov.hidden = true; ov.classList.remove('closing'); }, 240);
+    clearTimeout(modalCloseTimer);
+    modalCloseTimer = setTimeout(function () { ov.hidden = true; ov.classList.remove('closing'); modalCloseTimer = null; }, 240);
   }
   function openModal(opts) {
     var ov = $('#modal-overlay');
+    // se c'è una chiusura in corso, annullala: stiamo riaprendo subito (es. scelta -> form)
+    clearTimeout(modalCloseTimer); modalCloseTimer = null; ov.classList.remove('closing');
     $('#modal-title').textContent = opts.title || '';
     var body = $('#modal-body');
     body.innerHTML = '';
@@ -1244,6 +1248,76 @@
     return '<option value="">— tipo —</option>' + arr.map(function (w) { return '<option' + (w === selected ? ' selected' : '') + '>' + esc(w) + '</option>'; }).join('');
   }
 
+  // metadato compatto per uno slot
+  function slotMeta(it) {
+    if (it.cat === 'weapon' || it.cat === 'shield') { var d = (it.dmgBase || 0) + (it.scaleStat ? '+' + it.scaleStat : ''); return (it.dmgBase || it.scaleStat ? '💥' + d : (it.cat === 'shield' ? 'Scudo' : '')); }
+    if (it.cat === 'armor') return it.classe || 'Armatura';
+    if (it.cat === 'elmo') return it.hp ? '❤️+' + it.hp : 'Elmo';
+    if (it.cat === 'accessory') return accDisplay(it.accType);
+    return '';
+  }
+  function slotSquare(o) {
+    var s = document.createElement('button');
+    s.className = 'eq-slot' + (o.wide ? ' wide' : '') + (o.item ? ' full' : ' empty');
+    if (o.item) {
+      s.innerHTML = '<span class="es-x" aria-hidden="true">✕</span>' +
+        '<span class="es-name">' + esc(o.item.name || itemDefaultName(o.item)) + '</span>' +
+        '<span class="es-meta">' + esc(slotMeta(o.item)) + '</span>';
+      s.title = 'Tocca per togliere';
+    } else {
+      s.innerHTML = '<span class="es-plus">＋</span><span class="es-lbl">' + esc(o.label || 'Vuoto') + '</span>';
+      s.title = 'Tocca per equipaggiare';
+    }
+    s.addEventListener('click', o.onClick);
+    return s;
+  }
+  // griglia di slot di equipaggiamento per la categoria corrente
+  function buildEquipSlots(c, key) {
+    var box = document.createElement('div'); box.className = 'eq-slots';
+    if (key === 'weapons') {
+      var eqW = itemsByCat(c, ['weapon', 'shield']).filter(function (i) { return i.equipped; });
+      var used = 0;
+      eqW.forEach(function (it) { var sp = it.hands === 2 ? 2 : 1; used += sp; box.appendChild(slotSquare({ item: it, wide: sp === 2, onClick: function () { toggleEquip(c, it); } })); });
+      for (var i = used; i < 2; i++) box.appendChild(slotSquare({ label: 'Mano libera', onClick: function () { openEquipPicker(c, 'weapons'); } }));
+    } else if (key === 'armor' || key === 'elmo') {
+      var eqd = itemsByCat(c, key).filter(function (i) { return i.equipped; })[0];
+      box.appendChild(slotSquare({ item: eqd, label: key === 'armor' ? 'Armatura' : 'Elmo', onClick: eqd ? function () { toggleEquip(c, eqd); } : function () { openEquipPicker(c, key); } }));
+    } else if (key === 'accessory') {
+      var specs = [{ t: 'ring', l: 'Anello' }, { t: 'ring', l: 'Anello' }, { t: 'collana', l: 'Collana' }, { t: 'extra', l: 'Extra' }];
+      var byType = { ring: [], collana: [], extra: [] };
+      itemsByCat(c, 'accessory').filter(function (i) { return i.equipped; }).forEach(function (i) { (byType[i.accType] || byType.ring).push(i); });
+      var idx = { ring: 0, collana: 0, extra: 0 };
+      specs.forEach(function (sp) {
+        var it = byType[sp.t][idx[sp.t]++];
+        box.appendChild(slotSquare({ item: it, label: sp.l, onClick: it ? function () { toggleEquip(c, it); } : function () { openEquipPicker(c, 'accessory', sp.t); } }));
+      });
+    }
+    return box;
+  }
+  // selettore degli oggetti posseduti equipaggiabili in uno slot
+  function openEquipPicker(c, key, accType) {
+    var cats = key === 'weapons' ? ['weapon', 'shield'] : [key];
+    var avail = itemsByCat(c, cats).filter(function (it) {
+      if (it.equipped) return false;
+      if (accType && it.accType !== accType) return false;
+      return canEquip(c, it);
+    });
+    var wrap = document.createElement('div'); wrap.className = 'modal-list';
+    if (!avail.length) {
+      var p = document.createElement('p'); p.className = 'muted'; p.style.cssText = 'padding:8px 2px;margin:0;';
+      p.textContent = 'Nessun oggetto disponibile. Creane uno con “Crea” qui sotto.';
+      wrap.appendChild(p);
+    } else {
+      avail.forEach(function (it) {
+        var b = document.createElement('button'); b.className = 'modal-opt';
+        b.innerHTML = '<span>' + esc(it.name || itemDefaultName(it)) + '</span><span class="mo-meta">' + itemMeta(it) + '</span>';
+        b.addEventListener('click', function () { closeModal(); toggleEquip(c, it); });
+        wrap.appendChild(b);
+      });
+    }
+    openModal({ title: 'Equipaggia', bodyNode: wrap, actions: [{ label: 'Chiudi', onClick: closeModal }] });
+  }
+
   function viewArmamenti(c) {
     eqItems(c); // normalizza
     var frag = document.createElement('div');
@@ -1275,6 +1349,12 @@
 
     var cap = document.createElement('div'); cap.className = 'equip-cap'; cap.innerHTML = capacityText(c, cfg.key);
     frag.appendChild(cap);
+
+    // slot di equipaggiamento (quadrati): tocca per equipaggiare / togliere
+    frag.appendChild(buildEquipSlots(c, cfg.key));
+
+    var ownLbl = document.createElement('div'); ownLbl.className = 'eq-own-lbl'; ownLbl.textContent = 'I tuoi oggetti';
+    frag.appendChild(ownLbl);
 
     var create = btn('＋ Crea', 'primary', function () { createItemFlow(c, cfg.key); });
     create.classList.add('equip-create');
@@ -1342,7 +1422,19 @@
       wrap.appendChild(choiceBtn('Arma Magica', '🔮', function () { itemDialog(c, null, { cat: 'weapon', magic: true }); }));
       wrap.appendChild(choiceBtn('Scudo', '🛡️', function () { itemDialog(c, null, { cat: 'shield', magic: false }); }));
       openModal({ title: 'Cosa vuoi creare?', bodyNode: wrap, actions: [{ label: 'Annulla', onClick: closeModal }] });
-    } else if (key === 'armor') itemDialog(c, null, { cat: 'armor' });
+    } else if (key === 'armor') {
+      var wa = document.createElement('div'); wa.className = 'choice-cards';
+      function armBtn(classe, ico) {
+        var b = document.createElement('button'); b.className = 'choice-mini';
+        b.innerHTML = '<span class="cm-ico">' + ico + '</span>' + classe;
+        b.addEventListener('click', function () { closeModal(); itemDialog(c, null, { cat: 'armor', classe: classe }); });
+        return b;
+      }
+      wa.appendChild(armBtn('Leggera', '🥋'));
+      wa.appendChild(armBtn('Media', '🦺'));
+      wa.appendChild(armBtn('Pesante', '🛡️'));
+      openModal({ title: 'Che tipo di armatura?', bodyNode: wa, actions: [{ label: 'Annulla', onClick: closeModal }] });
+    }
     else if (key === 'elmo') itemDialog(c, null, { cat: 'elmo' });
     else if (key === 'accessory') itemDialog(c, null, { cat: 'accessory' });
   }
@@ -1365,17 +1457,34 @@
         row.querySelector('.b-del').addEventListener('click', function () { boosts.splice(i, 1); render(); });
         list.appendChild(row);
       });
-      addBtn.disabled = boosts.length >= 6;
+      addBtn.style.display = boosts.length >= 6 ? 'none' : '';
     }
     render();
     box.appendChild(list); box.appendChild(addBtn);
     return box;
   }
+  // etichette dei tipi di effetto
+  var EFF_LABELS = { '': 'Nessuno (descrittiva)', danno: '⚔️ Danno', cura: '✚ Cura', hp: '❤️ HP max', armatura: '🛡️ Armatura', status: '✦ Status', altro: '● Altro' };
+  var EFF_NUM = ['danno', 'cura', 'hp', 'armatura']; // effetti con valore numerico
+  function effOptions(sel) {
+    return ['', 'danno', 'cura', 'hp', 'armatura', 'status', 'altro'].map(function (k) {
+      return '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + EFF_LABELS[k] + '</option>';
+    }).join('');
+  }
+  // descrizione sintetica di un effetto (usata nelle card)
+  function effLabel(a) {
+    if (!a.effKind) return '';
+    if (EFF_NUM.indexOf(a.effKind) >= 0) {
+      var base = { danno: '⚔️', cura: '✚', hp: '❤️', armatura: '🛡️' }[a.effKind];
+      return base + ' ' + (a.effValue || 0) + (a.effKind === 'danno' && a.effScale ? ' + ' + a.effScale + '/2' : '');
+    }
+    return (a.effKind === 'status' ? '✦ ' : '● ') + (a.effText || EFF_LABELS[a.effKind]);
+  }
   // editor riusabile delle abilità dell'oggetto — opera su un array locale
   function buildAbilityEditor(abilities) {
     var box = document.createElement('div');
     var list = document.createElement('div'); list.className = 'iab-list';
-    var addBtn = btn('＋ Crea abilità', '', function () { abilities.push({ id: Store.genId(), name: '', note: '', countdown: 0 }); render(); });
+    var addBtn = btn('＋ Crea abilità', '', function () { abilities.push({ id: Store.genId(), name: '', note: '', countdown: 0, effKind: '', effValue: 0, effScale: '', effText: '' }); render(); });
     addBtn.classList.add('mini-add');
     function render() {
       list.innerHTML = '';
@@ -1385,6 +1494,9 @@
           '<div class="iab-row"><input class="iab-name" maxlength="40" placeholder="Nome abilità" />' +
           '<button class="iab-del" aria-label="Rimuovi">×</button></div>' +
           '<textarea class="iab-note" rows="2" maxlength="400" placeholder="Cosa fa..."></textarea>' +
+          '<div class="iab-eff"><label>Effetto (per i calcoli nei Fight)</label>' +
+          '<select class="iab-kind eq-select">' + effOptions(a.effKind || '') + '</select>' +
+          '<div class="iab-eff-fields"></div></div>' +
           '<div class="iab-cd"><label>Countdown turni (vuoto = ripetibile)</label><input class="iab-cdv" type="number" inputmode="numeric" min="0" /></div>';
         blk.querySelector('.iab-name').value = a.name || '';
         blk.querySelector('.iab-note').value = a.note || '';
@@ -1393,6 +1505,27 @@
         blk.querySelector('.iab-note').addEventListener('input', function () { a.note = this.value; });
         blk.querySelector('.iab-cdv').addEventListener('input', function () { a.countdown = Math.max(0, parseInt(this.value, 10) || 0); });
         blk.querySelector('.iab-del').addEventListener('click', function () { abilities.splice(i, 1); render(); });
+        var effFields = blk.querySelector('.iab-eff-fields');
+        function renderEff() {
+          effFields.innerHTML = '';
+          if (EFF_NUM.indexOf(a.effKind) >= 0) {
+            var unit = { danno: 'danno base', cura: 'PF curati', hp: 'HP max', armatura: 'armatura' }[a.effKind];
+            var h = '<div class="iab-eff-row"><input class="iab-val" type="number" inputmode="numeric" placeholder="' + unit + '" />';
+            if (a.effKind === 'danno') h += '<select class="iab-scale eq-select">' + statOptions(a.effScale || '', true) + '</select>';
+            h += '</div>';
+            effFields.innerHTML = h;
+            effFields.querySelector('.iab-val').value = a.effValue ? a.effValue : '';
+            effFields.querySelector('.iab-val').addEventListener('input', function () { a.effValue = parseInt(this.value, 10) || 0; });
+            var sc = effFields.querySelector('.iab-scale');
+            if (sc) sc.addEventListener('change', function () { a.effScale = this.value; });
+          } else if (a.effKind === 'status' || a.effKind === 'altro') {
+            effFields.innerHTML = '<input class="iab-etext" maxlength="60" placeholder="' + (a.effKind === 'status' ? 'Es. Avvelenato 2 turni' : 'Descrivi l\'effetto') + '" />';
+            effFields.querySelector('.iab-etext').value = a.effText || '';
+            effFields.querySelector('.iab-etext').addEventListener('input', function () { a.effText = this.value; });
+          }
+        }
+        blk.querySelector('.iab-kind').addEventListener('change', function () { a.effKind = this.value; renderEff(); });
+        renderEff();
         list.appendChild(blk);
       });
     }
@@ -1408,7 +1541,7 @@
     var magic = item ? !!item.magic : !!opts.magic;
     var editing = !!item;
     var boosts = (item ? item.boosts : []).map(function (b) { return { stat: b.stat, amount: b.amount }; });
-    var abilities = (item ? item.abilities : []).map(function (a) { return { id: a.id, name: a.name, note: a.note, countdown: a.countdown }; });
+    var abilities = (item ? item.abilities : []).map(function (a) { return { id: a.id, name: a.name, note: a.note, countdown: a.countdown, effKind: a.effKind || '', effValue: a.effValue || 0, effScale: a.effScale || '', effText: a.effText || '' }; });
 
     var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
     var html = '<div class="field"><label>Nome</label><input id="it-name" maxlength="40" /></div>';
@@ -1422,8 +1555,9 @@
         '</div>';
     }
     if (cat === 'armor') {
+      var preClasse = item ? item.classe : (opts.classe || '');
       html += '<div class="field"><label>Classe</label><select id="it-classe" class="eq-select"><option value="">— classe —</option>' +
-        Store.ARMOR_CLASSES.map(function (k) { return '<option' + (item && item.classe === k ? ' selected' : '') + '>' + esc(k) + '</option>'; }).join('') + '</select></div>';
+        Store.ARMOR_CLASSES.map(function (k) { return '<option' + (preClasse === k ? ' selected' : '') + '>' + esc(k) + '</option>'; }).join('') + '</select></div>';
     }
     if (cat === 'elmo') {
       html += '<div class="field"><label>HP aggiunti</label><input id="it-hp" type="number" inputmode="numeric" min="0" placeholder="0" /></div>';

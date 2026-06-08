@@ -90,10 +90,22 @@
       .slice(0, 6)
       .map(function (b) { return { stat: String(b.stat), amount: intOr0(b.amount) }; });
   }
+  // Tipi di effetto delle abilità (per i calcoli durante i Fight)
+  var ABILITY_EFFECTS = ['danno', 'cura', 'hp', 'armatura', 'status', 'altro'];
   function normalizeItemAbilities(arr) {
     if (!Array.isArray(arr)) return [];
     return arr.filter(function (a) { return a && (a.name || a.note); }).map(function (a) {
-      return { id: a.id || genId(), name: typeof a.name === 'string' ? a.name : '', note: typeof a.note === 'string' ? a.note : '', countdown: Math.max(0, intOr0(a.countdown)) };
+      var kind = ABILITY_EFFECTS.indexOf(a.effKind) >= 0 ? a.effKind : '';
+      return {
+        id: a.id || genId(),
+        name: typeof a.name === 'string' ? a.name : '',
+        note: typeof a.note === 'string' ? a.note : '',
+        countdown: Math.max(0, intOr0(a.countdown)),
+        effKind: kind,                                              // '' = solo descrittiva
+        effValue: intOr0(a.effValue),                              // numero per danno/cura/hp/armatura
+        effScale: typeof a.effScale === 'string' ? a.effScale : '',// stat su cui scala (es. danno)
+        effText: typeof a.effText === 'string' ? a.effText : ''    // testo per status/altro
+      };
     });
   }
   function normalizeItem(it) {
@@ -367,6 +379,7 @@
     ARMOR_CLASSES: ARMOR_CLASSES,
     WEAPON_2H: WEAPON_2H,
     weaponHands: weaponHands,
+    ABILITY_EFFECTS: ABILITY_EFFECTS,
     genId: genId,
     load: load,
     save: save,
