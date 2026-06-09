@@ -238,7 +238,7 @@
   }
 
   /* ---------- Campagne del Master ---------- */
-  // Creatura del bestiario: nome, PF, le 9 statistiche, note, immagine opzionale
+  // Creatura del bestiario: nome, PF, le 9 statistiche, note, immagine, abilità
   function normalizeCreature(m) {
     m = m || {};
     var stats = {};
@@ -250,19 +250,36 @@
       hp: Math.max(0, intOr0(m.hp)),
       stats: stats,
       note: typeof m.note === 'string' ? m.note : '',
-      image: typeof m.image === 'string' ? m.image : null
+      image: typeof m.image === 'string' ? m.image : null,
+      abilities: normalizeItemAbilities(m.abilities)
     };
   }
-  // Campagna: contenitore di classi, bestiario, note e arsenale
+  // Sessione di gioco: contenitore di note (più sessioni per campagna)
+  function normalizeSession(s) {
+    s = s || {};
+    return {
+      id: s.id || genId(),
+      name: typeof s.name === 'string' && s.name ? s.name : 'Sessione',
+      notes: typeof s.notes === 'string' ? s.notes : '',
+      createdAt: s.createdAt || Date.now()
+    };
+  }
+  // Campagna: contenitore di classi, bestiario, sessioni (note) e arsenale
   function normalizeCampaign(c) {
     c = c || {};
+    var sessions = Array.isArray(c.sessions) ? c.sessions.map(normalizeSession) : [];
+    // migrazione: vecchio campo notes (per-campagna) → prima sessione
+    if (!sessions.length) sessions = [normalizeSession({ name: 'Sessione 1', notes: typeof c.notes === 'string' ? c.notes : '' })];
+    var curr = c.currentSessionId;
+    if (sessions.map(function (s) { return s.id; }).indexOf(curr) < 0) curr = sessions[0].id;
     return {
       id: c.id || genId(),
       name: typeof c.name === 'string' && c.name ? c.name : 'Campagna',
       desc: typeof c.desc === 'string' ? c.desc : '',
       classes: Array.isArray(c.classes) ? c.classes.map(normalizeClass) : [],
       bestiary: Array.isArray(c.bestiary) ? c.bestiary.map(normalizeCreature) : [],
-      notes: typeof c.notes === 'string' ? c.notes : '',
+      sessions: sessions,
+      currentSessionId: curr,
       arsenal: normalizeEquip(c.arsenal || {})
     };
   }
@@ -423,6 +440,7 @@
     normalizeClass: normalizeClass,
     normalizeCampaign: normalizeCampaign,
     normalizeCreature: normalizeCreature,
+    normalizeSession: normalizeSession,
     ensureMaster: ensureMaster,
     exportCampaign: exportCampaign,
     normalizeNode: normalizeNode,

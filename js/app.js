@@ -1320,6 +1320,47 @@
     openModal({ title: 'Equipaggia', bodyNode: wrap, actions: [{ label: 'Chiudi', onClick: closeModal }] });
   }
 
+  // dettaglio completo di un oggetto (riusato nell'anteprima dell'equipaggiato)
+  function itemDetailHtml(it) {
+    var rows = [];
+    if (it.cat === 'weapon' || it.cat === 'shield') {
+      if (it.tipo) rows.push('Tipo: ' + esc(it.tipo));
+      rows.push('Mani: ' + (it.hands === 2 ? '2' : '1'));
+      if (it.dmgBase || it.scaleStat) rows.push('Danni: ' + (it.dmgBase || 0) + (it.scaleStat ? ' + ' + esc(it.scaleStat) + '/2' : ''));
+    }
+    if (it.cat === 'armor' && it.classe) rows.push('Classe: ' + esc(it.classe));
+    if (it.cat === 'elmo' && it.hp) rows.push('HP: +' + it.hp);
+    if (it.cat === 'accessory') rows.push('Tipo: ' + accDisplay(it.accType));
+    var html = rows.length ? '<div class="id-meta">' + rows.map(function (r) { return '<span>' + r + '</span>'; }).join('') + '</div>' : '';
+    if (it.boosts && it.boosts.length) html += '<div class="id-boosts">' + it.boosts.map(function (b) { return '<span class="id-boost">' + (b.amount >= 0 ? '+' : '') + b.amount + ' ' + esc(b.stat) + '</span>'; }).join('') + '</div>';
+    if (it.abilities && it.abilities.length) html += '<div class="id-abils">' + it.abilities.map(function (a) { var el = effLabel(a); return '<div class="id-ab"><b>' + esc(a.name || 'Abilità') + '</b>' + (el ? ' · ' + esc(el) : '') + (a.countdown ? ' · ⏳' + a.countdown : '') + (a.note ? '<div class="id-ab-note">' + esc(a.note) + '</div>' : '') + '</div>'; }).join('') + '</div>';
+    if (it.note) html += '<p class="id-note">' + esc(it.note) + '</p>';
+    return html || '<p class="muted" style="margin:0">Nessun dettaglio.</p>';
+  }
+  // anteprima di tutto ciò che è equipaggiato, apribile nei dettagli
+  function equippedOverview(c) {
+    var eq = eqItems(c).filter(function (i) { return i.equipped; });
+    var box = document.createElement('div'); box.className = 'eq-overview';
+    var h = document.createElement('div'); h.className = 'eq-ov-head'; h.innerHTML = '<span>🎖️ Equipaggiato</span><span class="eq-ov-count">' + eq.length + '</span>';
+    box.appendChild(h);
+    if (!eq.length) {
+      var p = document.createElement('p'); p.className = 'muted'; p.style.cssText = 'margin:4px 2px 0;font-size:.86rem;';
+      p.textContent = 'Niente equipaggiato. Apri una categoria e tocca uno slot.';
+      box.appendChild(p); return box;
+    }
+    eq.forEach(function (it) {
+      var row = document.createElement('div'); row.className = 'eq-ov-item';
+      var head = document.createElement('button'); head.className = 'eq-ov-row';
+      head.innerHTML = '<span class="eq-ov-ico">' + ({ weapon: '⚔️', shield: '🛡️', armor: '🛡️', elmo: '⛑️', accessory: '💍' }[it.cat] || '❖') + '</span>' +
+        '<span class="eq-ov-main"><span class="eq-ov-name">' + esc(it.name || itemDefaultName(it)) + '</span><span class="eq-ov-meta">' + itemMeta(it) + '</span></span>' +
+        '<span class="eq-ov-chev">▾</span>';
+      var det = document.createElement('div'); det.className = 'eq-ov-det'; det.innerHTML = itemDetailHtml(it); det.hidden = true;
+      head.addEventListener('click', function () { det.hidden = !det.hidden; row.classList.toggle('open', !det.hidden); });
+      row.appendChild(head); row.appendChild(det); box.appendChild(row);
+    });
+    return box;
+  }
+
   function viewArmamenti(c) {
     eqItems(c); // normalizza
     var frag = document.createElement('div');
@@ -1329,6 +1370,7 @@
       var hint = document.createElement('p'); hint.className = 'muted'; hint.style.cssText = 'margin:0 2px 6px;font-size:.86rem;';
       hint.textContent = 'Ottieni bonus e abilità solo dagli oggetti equipaggiati.';
       frag.appendChild(hint);
+      frag.appendChild(equippedOverview(c));
       var grid = document.createElement('div'); grid.className = 'home-nav';
       ARM_CATS.forEach(function (cfg) {
         var all = itemsByCat(c, cfg.cats);
@@ -1708,6 +1750,17 @@
       title: title, bodyNode: wrap, focus: '#tf-1',
       actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }]
     });
+  }
+
+  // dialog a campo singolo
+  function promptDialog(title, label, placeholder, value, onSave) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    wrap.innerHTML = '<div class="field"><label>' + esc(label) + '</label><input id="pp-1" maxlength="50" placeholder="' + esc(placeholder || '') + '" /></div>';
+    wrap.querySelector('#pp-1').value = value || '';
+    function save() { var v = wrap.querySelector('#pp-1').value.trim(); if (!v) { wrap.querySelector('#pp-1').focus(); return; } onSave(v); closeModal(); }
+    wrap.querySelector('#pp-1').addEventListener('keydown', function (e) { if (e.key === 'Enter') save(); });
+    openModal({ title: title, bodyNode: wrap, focus: '#pp-1', actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
   }
 
   // esporta scheda corrente
@@ -2107,7 +2160,7 @@
     }
     grid.appendChild(navBtn('🌳', 'Classi e abilità', (camp.classes.length) + ' classi', function () { navTo('ability-editor'); }));
     grid.appendChild(navBtn('🐉', 'Bestiario', (camp.bestiary.length) + ' creature', function () { masterSection = 'bestiario'; renderMaster(); }));
-    grid.appendChild(navBtn('📝', 'Note', (camp.notes ? 'compilate' : 'vuote'), function () { masterSection = 'note'; renderMaster(); }));
+    grid.appendChild(navBtn('📝', 'Note', camp.sessions.length + ' sessioni', function () { masterSection = 'note'; renderMaster(); }));
     grid.appendChild(navBtn('⚔️', 'Arsenale', (camp.arsenal.items.length) + ' oggetti', function () { masterSection = 'arsenale'; arsenalSub = null; renderMaster(); }));
     body.appendChild(grid);
   }
@@ -2262,11 +2315,13 @@
     camp.bestiary.forEach(function (m) {
       var card = document.createElement('div'); card.className = 'panel-card creature-card';
       var statsLine = Store.STAT_DEFS.filter(function (d) { return m.stats[d.abbr]; }).map(function (d) { return d.abbr + ' ' + m.stats[d.abbr]; }).join(' · ');
+      var abN = (m.abilities || []).length;
       card.innerHTML =
         (m.image ? '<img class="cr-img" src="' + m.image + '" alt="" />' : '') +
         '<h4 class="tree-li-name">' + esc(m.name || 'Creatura') + '</h4>' +
-        '<p class="muted">❤️ ' + (m.hp || 0) + ' PF' + (statsLine ? ' · ' + statsLine : '') + '</p>' +
-        (m.note ? '<p class="cr-note">' + esc(m.note) + '</p>' : '');
+        '<p class="muted">❤️ ' + (m.hp || 0) + ' PF' + (statsLine ? ' · ' + statsLine : '') + (abN ? ' · 🎯 ' + abN + ' abilità' : '') + '</p>' +
+        (m.note ? '<p class="cr-note">' + esc(m.note) + '</p>' : '') +
+        ((m.abilities || []).length ? '<div class="cr-abils">' + m.abilities.map(function (a) { var el = effLabel(a); return '<span class="cr-ab"><b>' + esc(a.name || 'Abilità') + '</b>' + (el ? ' · ' + esc(el) : '') + (a.countdown ? ' · ⏳' + a.countdown : '') + '</span>'; }).join('') + '</div>' : '');
       var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;';
       row.appendChild(btn('Modifica', '', function () { creatureDialog(m); }));
       row.appendChild(btn('Elimina', 'danger', function () {
@@ -2283,6 +2338,7 @@
     var editing = !!m;
     var imgData = m ? (m.image || null) : null;
     var stats = {}; Store.STAT_DEFS.forEach(function (d) { stats[d.abbr] = m ? (m.stats[d.abbr] || 0) : 0; });
+    var abilities = (m && m.abilities ? m.abilities : []).map(function (a) { return { id: a.id, name: a.name, note: a.note, countdown: a.countdown, effKind: a.effKind || '', effValue: a.effValue || 0, effScale: a.effScale || '', effText: a.effText || '' }; });
     var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
     var statsGrid = Store.STAT_DEFS.map(function (d) {
       return '<div class="cr-stat"><label>' + d.abbr + '</label><input data-stat="' + d.abbr + '" type="number" inputmode="numeric" value="' + stats[d.abbr] + '" /></div>';
@@ -2295,7 +2351,9 @@
       '<div class="field"><label>Immagine (opzionale)</label><div class="cr-img-row"><div class="cr-img-prev" id="cr-prev"></div>' +
       '<button type="button" class="tool-btn" id="cr-img-btn">Scegli immagine</button>' +
       '<button type="button" class="tool-btn" id="cr-img-clear" style="display:none">Rimuovi</button></div>' +
-      '<input type="file" id="cr-img-file" accept="image/*" hidden /></div>';
+      '<input type="file" id="cr-img-file" accept="image/*" hidden /></div>' +
+      '<div class="field"><label>Abilità (pulsanti nella sezione Fight)</label><div id="cr-abil"></div></div>';
+    wrap.querySelector('#cr-abil').appendChild(buildAbilityEditor(abilities));
     wrap.querySelector('#cr-name').value = m ? m.name : '';
     wrap.querySelector('#cr-hp').value = m && m.hp ? m.hp : '';
     wrap.querySelector('#cr-note').value = m ? m.note : '';
@@ -2315,7 +2373,7 @@
       var name = wrap.querySelector('#cr-name').value.trim();
       if (!name) { wrap.querySelector('#cr-name').focus(); toast('Dai un nome', 'err'); return; }
       var st = {}; wrap.querySelectorAll('[data-stat]').forEach(function (i) { st[i.getAttribute('data-stat')] = parseInt(i.value, 10) || 0; });
-      var data = { id: m ? m.id : undefined, name: name, hp: parseInt(wrap.querySelector('#cr-hp').value, 10) || 0, stats: st, note: wrap.querySelector('#cr-note').value.trim(), image: imgData };
+      var data = { id: m ? m.id : undefined, name: name, hp: parseInt(wrap.querySelector('#cr-hp').value, 10) || 0, stats: st, note: wrap.querySelector('#cr-note').value.trim(), image: imgData, abilities: abilities };
       var nn = Store.normalizeCreature(data);
       if (m) { var i = camp.bestiary.map(function (x) { return x.id; }).indexOf(m.id); camp.bestiary[i] = nn; }
       else camp.bestiary.unshift(nn);
@@ -2325,15 +2383,51 @@
       actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
   }
 
-  /* ---- Note della campagna (testo libero, autosalvataggio) ---- */
+  /* ---- Note per sessione di gioco (ogni sessione ha le sue note) ---- */
+  function currentSession(camp) {
+    var s = camp.sessions.filter(function (x) { return x.id === camp.currentSessionId; })[0];
+    if (!s) { s = camp.sessions[0]; camp.currentSessionId = s.id; }
+    return s;
+  }
   function renderCampaignNotes(body) {
     var camp = masterCampaign();
     body.appendChild(masterSubHead('Note · ' + camp.name, '📝'));
+
+    var sess = currentSession(camp);
+    var card = document.createElement('div'); card.className = 'panel-card campaign-card';
+    card.innerHTML = '<h3>🗓️ Sessione di gioco</h3>';
+    var sel = document.createElement('select'); sel.className = 'eq-select camp-select';
+    camp.sessions.forEach(function (s) {
+      var o = document.createElement('option'); o.value = s.id; o.textContent = s.name; if (s.id === sess.id) o.selected = true; sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () { camp.currentSessionId = this.value; persist(); renderMaster(); });
+    card.appendChild(sel);
+    var row = document.createElement('div'); row.className = 'camp-actions';
+    row.appendChild(btn('＋ Nuova', '', function () {
+      promptDialog('Nuova sessione', 'Nome', 'Es. Sessione ' + (camp.sessions.length + 1), '', function (name) {
+        var s = Store.normalizeSession({ name: name });
+        camp.sessions.push(s); camp.currentSessionId = s.id; persist(); renderMaster();
+      });
+    }));
+    row.appendChild(btn('✎ Rinomina', '', function () {
+      promptDialog('Rinomina sessione', 'Nome', '', sess.name, function (name) { sess.name = name; persist(); renderMaster(); });
+    }));
+    row.appendChild(btn('🗑 Elimina', 'danger', function () {
+      if (camp.sessions.length <= 1) { toast('Deve restare almeno una sessione', 'err'); return; }
+      confirmDialog('Elimina sessione', 'Eliminare "' + sess.name + '" e le sue note?', 'Elimina', true).then(function (ok) {
+        if (!ok) return;
+        camp.sessions = camp.sessions.filter(function (x) { return x.id !== sess.id; });
+        camp.currentSessionId = camp.sessions[0].id; persist(); renderMaster();
+      });
+    }));
+    card.appendChild(row);
+    body.appendChild(card);
+
     var ta = document.createElement('textarea'); ta.className = 'field note-area';
-    ta.placeholder = 'Trama, PNG, segreti, agganci, ricompense... tutto ciò che ti serve per questa campagna.';
-    ta.value = camp.notes || '';
+    ta.placeholder = 'Cosa è successo in questa sessione: trama, PNG incontrati, scelte, ricompense, agganci per la prossima...';
+    ta.value = sess.notes || '';
     var t;
-    ta.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { camp.notes = ta.value; persist(); }, 350); });
+    ta.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { sess.notes = ta.value; persist(); }, 350); });
     var wrap = document.createElement('div'); wrap.className = 'field'; wrap.appendChild(ta);
     body.appendChild(wrap);
   }
