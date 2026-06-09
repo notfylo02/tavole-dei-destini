@@ -24,6 +24,8 @@
   var currentCharId = null;
   var currentSection = 'statistiche';
   var armSubpage = null;        // Armamenti: null=hub | 'weapons' | 'armor' | 'elmo' | 'accessory'
+  var masterSection = null;     // Plancia Master: null=hub | 'bestiario' | 'note' | 'arsenale'
+  var arsenalSub = null;        // Arsenale: null=hub | 'weapons' | 'armor' | 'elmo' | 'accessory'
   var appRole = 'player';       // 'master' | 'player' — ruolo corrente (per menu e sessione)
   var activeCharId = null;      // PG con cui il giocatore è in sessione (riceve abilità/punti)
   var editingClassId = null;    // classe aperta nell'editor master
@@ -1389,27 +1391,38 @@
     return bits.join(' · ');
   }
 
-  function itemCard(c, it) {
-    var e = document.createElement('div'); e.className = 'entry item-card' + (it.equipped ? ' equipped' : '');
-    e.innerHTML =
-      '<button class="eq-star" title="Equipaggia" aria-label="Equipaggia">' + (it.equipped ? '★' : '☆') + '</button>' +
+  // ctx: { rerender, mode:'equip'|'arsenal' } — di default scheda giocatore
+  function defaultRerender() { renderSection(); refreshAbilitaIfOpen(); }
+  function itemCard(c, it, ctx) {
+    ctx = ctx || {};
+    var rerender = ctx.rerender || defaultRerender;
+    var mode = ctx.mode || 'equip';
+    var e = document.createElement('div'); e.className = 'entry item-card' + (mode === 'equip' && it.equipped ? ' equipped' : '');
+    var lead = (mode === 'equip')
+      ? '<button class="eq-star" title="Equipaggia" aria-label="Equipaggia">' + (it.equipped ? '★' : '☆') + '</button>'
+      : '<span class="ic-lead" aria-hidden="true">' + ({ weapon: '⚔️', shield: '🛡️', armor: '🛡️', elmo: '⛑️', accessory: '💍' }[it.cat] || '❖') + '</span>';
+    e.innerHTML = lead +
       '<div class="e-main"><div class="e-name">' + esc(it.name || itemDefaultName(it)) + '</div>' +
       '<div class="e-sub">' + itemMeta(it) + '</div></div>' +
+      (mode === 'arsenal' ? '<button class="ic-send" title="Invia a un giocatore" aria-label="Invia">📤</button>' : '') +
       '<button class="ic-edit" title="Modifica" aria-label="Modifica">✎</button>' +
       '<button class="e-del" title="Rimuovi" aria-label="Rimuovi">×</button>';
-    e.querySelector('.eq-star').addEventListener('click', function (ev) { ev.stopPropagation(); toggleEquip(c, it); });
-    e.querySelector('.ic-edit').addEventListener('click', function (ev) { ev.stopPropagation(); itemDialog(c, it, { cat: it.cat, magic: it.magic }); });
+    if (mode === 'equip') e.querySelector('.eq-star').addEventListener('click', function (ev) { ev.stopPropagation(); toggleEquip(c, it); });
+    if (mode === 'arsenal') e.querySelector('.ic-send').addEventListener('click', function (ev) { ev.stopPropagation(); sendArsenalItem(it); });
+    e.querySelector('.ic-edit').addEventListener('click', function (ev) { ev.stopPropagation(); itemDialog(c, it, { cat: it.cat, magic: it.magic, rerender: rerender }); });
     e.querySelector('.e-del').addEventListener('click', function (ev) {
       ev.stopPropagation();
       c.sheet.armamenti.items = eqItems(c).filter(function (x) { return x.id !== it.id; });
-      persist(); renderSection(); refreshAbilitaIfOpen();
+      persist(); rerender();
     });
-    e.addEventListener('click', function () { itemDialog(c, it, { cat: it.cat, magic: it.magic }); });
+    e.addEventListener('click', function () { itemDialog(c, it, { cat: it.cat, magic: it.magic, rerender: rerender }); });
     return e;
   }
 
   // scelta iniziale per "Armi e scudi", poi apre il form
-  function createItemFlow(c, key) {
+  function createItemFlow(c, key, ctx) {
+    var rr = (ctx && ctx.rerender) || defaultRerender;
+    function open(opts) { opts.rerender = rr; itemDialog(c, null, opts); }
     if (key === 'weapons') {
       var wrap = document.createElement('div'); wrap.className = 'choice-cards';
       function choiceBtn(label, ico, onPick) {
@@ -1418,16 +1431,16 @@
         b.addEventListener('click', function () { closeModal(); onPick(); });
         return b;
       }
-      wrap.appendChild(choiceBtn('Arma Fisica', '🗡️', function () { itemDialog(c, null, { cat: 'weapon', magic: false }); }));
-      wrap.appendChild(choiceBtn('Arma Magica', '🔮', function () { itemDialog(c, null, { cat: 'weapon', magic: true }); }));
-      wrap.appendChild(choiceBtn('Scudo', '🛡️', function () { itemDialog(c, null, { cat: 'shield', magic: false }); }));
+      wrap.appendChild(choiceBtn('Arma Fisica', '🗡️', function () { open({ cat: 'weapon', magic: false }); }));
+      wrap.appendChild(choiceBtn('Arma Magica', '🔮', function () { open({ cat: 'weapon', magic: true }); }));
+      wrap.appendChild(choiceBtn('Scudo', '🛡️', function () { open({ cat: 'shield', magic: false }); }));
       openModal({ title: 'Cosa vuoi creare?', bodyNode: wrap, actions: [{ label: 'Annulla', onClick: closeModal }] });
     } else if (key === 'armor') {
       var wa = document.createElement('div'); wa.className = 'choice-cards';
       function armBtn(classe, ico) {
         var b = document.createElement('button'); b.className = 'choice-mini';
         b.innerHTML = '<span class="cm-ico">' + ico + '</span>' + classe;
-        b.addEventListener('click', function () { closeModal(); itemDialog(c, null, { cat: 'armor', classe: classe }); });
+        b.addEventListener('click', function () { closeModal(); open({ cat: 'armor', classe: classe }); });
         return b;
       }
       wa.appendChild(armBtn('Leggera', '🥋'));
@@ -1435,8 +1448,8 @@
       wa.appendChild(armBtn('Pesante', '🛡️'));
       openModal({ title: 'Che tipo di armatura?', bodyNode: wa, actions: [{ label: 'Annulla', onClick: closeModal }] });
     }
-    else if (key === 'elmo') itemDialog(c, null, { cat: 'elmo' });
-    else if (key === 'accessory') itemDialog(c, null, { cat: 'accessory' });
+    else if (key === 'elmo') open({ cat: 'elmo' });
+    else if (key === 'accessory') open({ cat: 'accessory' });
   }
 
   // editor riusabile dei boost (max 6) — opera su un array locale
@@ -1597,7 +1610,7 @@
         var i = eqItems(c).map(function (x) { return x.id; }).indexOf(item.id);
         nn.equipped = item.equipped; eqItems(c)[i] = nn;
       } else { eqItems(c).push(nn); }
-      persist(); closeModal(); renderSection(); refreshAbilitaIfOpen();
+      persist(); closeModal(); (opts.rerender || defaultRerender)();
     }
     var titleMap = { weapon: magic ? 'Arma magica' : 'Arma fisica', shield: 'Scudo', armor: 'Armatura', elmo: 'Elmo', accessory: 'Accessorio' };
     openModal({ title: (editing ? 'Modifica ' : 'Nuovo: ') + (titleMap[cat] || 'Oggetto'), bodyNode: wrap, focus: '#it-name',
@@ -1736,17 +1749,24 @@
         confirmDialog('Importa backup', 'Vuoi SOSTITUIRE tutti i dati attuali con quelli del backup? I dati attuali andranno persi.', 'Sostituisci', true)
           .then(function (ok) {
             if (!ok) return;
-            var master = data.data.master || {};
-            master.classes = Array.isArray(master.classes) ? master.classes.map(Store.normalizeClass) : [];
             state = {
               version: Store.VERSION,
               characters: (data.data.characters || []).map(function (c) { c.sheet = Store.mergeSheet(c.sheet); return c; }),
               folders: data.data.folders || [],
-              master: master
+              master: Store.ensureMaster(data.data.master || {})
             };
             persist(); currentFolderId = null; renderPlayer();
             toast('Backup importato', 'ok');
           });
+      } else if (data && data.kind === 'tdd-campaign' && data.campaign) {
+        var camp = Store.normalizeCampaign(data.campaign);
+        camp.id = Store.genId();
+        masterCampaign(); // assicura struttura
+        state.master.campaigns.unshift(camp);
+        state.master.currentCampaignId = camp.id;
+        persist();
+        if (appRole === 'master') { masterSection = null; if (currentView === 'master') renderMaster(); }
+        toast('Campagna importata', 'ok');
       } else {
         toast('File non riconosciuto', 'err');
       }
@@ -1825,8 +1845,11 @@
     nav.innerHTML = '';
     var items = [];
     if (appRole === 'master') {
-      items.push({ ico: '🛠️', label: 'Plancia', go: function () { navTo('master'); } });
-      items.push({ ico: '🌳', label: 'Abilità', go: function () { navTo('ability-editor'); } });
+      items.push({ ico: '🛠️', label: 'Plancia', go: function () { masterSection = null; navTo('master'); if (currentView === 'master') renderMaster(); } });
+      items.push({ ico: '🌳', label: 'Classi e abilità', go: function () { navTo('ability-editor'); } });
+      items.push({ ico: '🐉', label: 'Bestiario', go: function () { masterSection = 'bestiario'; if (currentView !== 'master') navTo('master'); else renderMaster(); closeAppDrawer(); } });
+      items.push({ ico: '📝', label: 'Note', go: function () { masterSection = 'note'; if (currentView !== 'master') navTo('master'); else renderMaster(); closeAppDrawer(); } });
+      items.push({ ico: '⚔️', label: 'Arsenale', go: function () { masterSection = 'arsenale'; arsenalSub = null; if (currentView !== 'master') navTo('master'); else renderMaster(); closeAppDrawer(); } });
       items.push({ sep: true });
       items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
       items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
@@ -1964,15 +1987,26 @@
     var c = activeChar();
     if (!c) { toast('Scegli una scheda in Sessione per ricevere equipaggiamento', 'err'); return; }
     if (!item || typeof item !== 'object') return;
-    var kind = item.kind || item.cat || 'weapon';
-    var data = { name: item.name || '', note: item.desc || item.note || '' };
-    if (kind === 'weapon') { data.cat = 'weapon'; data.tipo = item.tipo || ''; data.magic = Store.WEAPON_CAT.magiche.indexOf(data.tipo) >= 0; }
-    else if (kind === 'shield') { data.cat = 'shield'; }
-    else if (kind === 'armor') { data.cat = 'armor'; data.classe = item.classe || ''; }
-    else if (kind === 'elmo') { data.cat = 'elmo'; data.hp = item.hp || 0; }
-    else if (kind === 'accessory') { data.cat = 'accessory'; var slot = item.slot || ''; data.accType = (slot === 'collana') ? 'collana' : (slot === 'extra' ? 'extra' : 'ring'); }
-    else { data.cat = 'weapon'; }
-    eqItems(c).push(Store.normalizeItem(data)); // arriva NON equipaggiato
+    var nn;
+    // item ricco dall'arsenale (ha già il modello completo) → normalizza direttamente
+    var richCats = ['weapon', 'shield', 'armor', 'elmo', 'accessory'];
+    if (item.cat && richCats.indexOf(item.cat) >= 0 && (item.boosts || item.abilities || item.dmgBase != null || item.hp != null || item.scaleStat != null)) {
+      var clone = JSON.parse(JSON.stringify(item)); clone.id = undefined; clone.equipped = false;
+      nn = Store.normalizeItem(clone);
+    } else {
+      // formato semplice {kind,name,desc,...}
+      var kind = item.kind || item.cat || 'weapon';
+      var data = { name: item.name || '', note: item.desc || item.note || '' };
+      if (kind === 'weapon') { data.cat = 'weapon'; data.tipo = item.tipo || ''; data.magic = Store.WEAPON_CAT.magiche.indexOf(data.tipo) >= 0; }
+      else if (kind === 'shield') { data.cat = 'shield'; }
+      else if (kind === 'armor') { data.cat = 'armor'; data.classe = item.classe || ''; }
+      else if (kind === 'elmo') { data.cat = 'elmo'; data.hp = item.hp || 0; }
+      else if (kind === 'accessory') { data.cat = 'accessory'; var slot = item.slot || ''; data.accType = (slot === 'collana') ? 'collana' : (slot === 'extra' ? 'extra' : 'ring'); }
+      else { data.cat = 'weapon'; }
+      nn = Store.normalizeItem(data);
+    }
+    nn.equipped = false;
+    eqItems(c).push(nn); // arriva NON equipaggiato
     persist();
     toast('🎒 Equipaggiamento ricevuto dal Master', 'ok');
     if (currentView === 'sheet' && currentSection === 'armamenti') renderSection();
@@ -2030,14 +2064,20 @@
     var body = $('#master-body');
     if (!body) return;
     body.innerHTML = '';
+    if (masterSection === 'arsenale') { renderArsenal(body); return; }
+    if (masterSection === 'bestiario') { renderBestiary(body); return; }
+    if (masterSection === 'note') { renderCampaignNotes(body); return; }
+
     var st = Net.status();
     var on = st.connected;
+
+    body.appendChild(campaignCard());
 
     var card = document.createElement('div'); card.className = 'panel-card';
     var acts = document.createElement('div');
     acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;';
     if (on) {
-      card.innerHTML = '<h3>Partita in corso</h3>' +
+      card.innerHTML = '<h3>Partita in corso · ' + esc(masterCampaign().name) + '</h3>' +
         '<div class="code-display"><div class="code">' + esc(st.code || '') + '</div>' +
         '<div class="code-hint">I giocatori entrano con questo codice (stessa rete o hotspot)</div></div>';
       acts.appendChild(btn('🖼️ Mostra immagine', 'primary', pickBroadcastImage));
@@ -2047,11 +2087,8 @@
     } else if (st.state === 'connecting') {
       card.innerHTML = '<h3>Avvio della partita…</h3><p class="muted">Creazione della sessione in corso…</p>';
     } else {
-      card.innerHTML = '<h3>Avvia la partita</h3><p class="muted">Crea la sessione: otterrai un <b>codice</b> da dare ai giocatori per farli entrare. Dovete essere sulla stessa rete o hotspot.</p>';
-      var startBtn = btn('⚔️ Avvia partita', 'primary big', function () {
-        if (typeof Net === 'undefined' || !Net.available()) { toast('Serve la connessione a internet', 'err'); return; }
-        var n = netName('Master'); saveNetName(n); Net.host(n);
-      });
+      card.innerHTML = '<h3>Avvia la partita</h3><p class="muted">Crea la sessione: otterrai un <b>codice</b> da dare ai giocatori. Sceglierai con quale campagna giocare.</p>';
+      var startBtn = btn('⚔️ Avvia partita', 'primary big', startSessionFlow);
       startBtn.style.marginTop = '12px';
       acts.appendChild(startBtn);
     }
@@ -2059,7 +2096,246 @@
     body.appendChild(card);
 
     if (on) body.appendChild(membersCard(st));
-    body.appendChild(panelCard('Regole e manuale', 'Qui potrai definire le regole del tuo gioco: lo progetteremo nel prossimo passo.'));
+
+    // navigazione alle sezioni della campagna
+    var camp = masterCampaign();
+    var grid = document.createElement('div'); grid.className = 'home-nav';
+    function navBtn(ico, label, sub, fn) {
+      var b = document.createElement('button'); b.className = 'home-btn';
+      b.innerHTML = '<span class="hb-ico">' + ico + '</span><span class="hb-lbl">' + label + '</span><span class="hb-sub">' + sub + '</span>';
+      b.addEventListener('click', fn); return b;
+    }
+    grid.appendChild(navBtn('🌳', 'Classi e abilità', (camp.classes.length) + ' classi', function () { navTo('ability-editor'); }));
+    grid.appendChild(navBtn('🐉', 'Bestiario', (camp.bestiary.length) + ' creature', function () { masterSection = 'bestiario'; renderMaster(); }));
+    grid.appendChild(navBtn('📝', 'Note', (camp.notes ? 'compilate' : 'vuote'), function () { masterSection = 'note'; renderMaster(); }));
+    grid.appendChild(navBtn('⚔️', 'Arsenale', (camp.arsenal.items.length) + ' oggetti', function () { masterSection = 'arsenale'; arsenalSub = null; renderMaster(); }));
+    body.appendChild(grid);
+  }
+
+  // intestazione di una sotto-sezione della Plancia con ritorno
+  function masterSubHead(title, ico, backFn) {
+    var head = document.createElement('div'); head.className = 'section-head';
+    head.innerHTML = '<h3>' + ico + ' ' + esc(title) + '</h3>';
+    head.appendChild(btn('‹ Plancia', '', backFn || function () { masterSection = null; renderMaster(); }));
+    return head;
+  }
+
+  /* ---- Selettore + gestione campagne ---- */
+  function campaignCard() {
+    var camp = masterCampaign();
+    var card = document.createElement('div'); card.className = 'panel-card campaign-card';
+    card.innerHTML = '<h3>📖 Campagna</h3>';
+    var sel = document.createElement('select'); sel.className = 'eq-select camp-select';
+    state.master.campaigns.forEach(function (cp) {
+      var o = document.createElement('option'); o.value = cp.id; o.textContent = cp.name; if (cp.id === camp.id) o.selected = true; sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () {
+      state.master.currentCampaignId = this.value; persist();
+      editingClassId = null; editingAbilityId = null; masterSection = null;
+      toast('Campagna: ' + masterCampaign().name, 'ok'); renderMaster();
+    });
+    card.appendChild(sel);
+    if (camp.desc) { var d = document.createElement('p'); d.className = 'muted'; d.style.margin = '8px 0 0'; d.textContent = camp.desc; card.appendChild(d); }
+    var row = document.createElement('div'); row.className = 'camp-actions';
+    row.appendChild(btn('＋ Nuova', '', newCampaignDialog));
+    row.appendChild(btn('✎ Rinomina', '', function () { renameCampaignDialog(camp); }));
+    row.appendChild(btn('⭳ Esporta', '', function () { Store.exportCampaign(camp); toast('Campagna esportata', 'ok'); }));
+    row.appendChild(btn('⭱ Importa', '', function () { $('#import-file').click(); }));
+    row.appendChild(btn('🗑 Elimina', 'danger', function () { deleteCampaign(camp); }));
+    card.appendChild(row);
+    return card;
+  }
+  function newCampaignDialog() {
+    twoFieldDialog('Nuova campagna', 'Nome', 'Es. Le Terre Spezzate', 'Descrizione', 'Ambientazione, tono, note...', function (name, desc) {
+      var cp = Store.normalizeCampaign({ name: name, desc: desc });
+      state.master.campaigns.unshift(cp); state.master.currentCampaignId = cp.id;
+      editingClassId = null; editingAbilityId = null; masterSection = null;
+      persist(); renderMaster();
+    }, '', '', true);
+  }
+  function renameCampaignDialog(cp) {
+    twoFieldDialog('Modifica campagna', 'Nome', '', 'Descrizione', '', function (name, desc) {
+      cp.name = name; cp.desc = desc; persist(); renderMaster();
+    }, cp.name, cp.desc, true);
+  }
+  function deleteCampaign(cp) {
+    if (state.master.campaigns.length <= 1) { toast('Deve restare almeno una campagna', 'err'); return; }
+    confirmDialog('Elimina campagna', 'Eliminare "' + cp.name + '" con le sue classi, bestiario, note e arsenale?', 'Elimina', true).then(function (ok) {
+      if (!ok) return;
+      state.master.campaigns = state.master.campaigns.filter(function (x) { return x.id !== cp.id; });
+      state.master.currentCampaignId = state.master.campaigns[0].id;
+      editingClassId = null; editingAbilityId = null; masterSection = null;
+      persist(); renderMaster();
+    });
+  }
+  // Scelta della campagna all'avvio della sessione
+  function startSessionFlow() {
+    if (typeof Net === 'undefined' || !Net.available()) { toast('Serve la connessione a internet', 'err'); return; }
+    var camps = state.master.campaigns;
+    function host() { var n = netName('Master'); saveNetName(n); Net.host(n); }
+    if (camps.length <= 1) { masterCampaign(); host(); return; }
+    var wrap = document.createElement('div'); wrap.className = 'modal-list';
+    camps.forEach(function (cp) {
+      var b = document.createElement('button'); b.className = 'modal-opt';
+      b.innerHTML = '<span>' + esc(cp.name) + '</span>' + (cp.desc ? '<span class="mo-meta">' + esc(cp.desc) + '</span>' : '');
+      b.addEventListener('click', function () {
+        state.master.currentCampaignId = cp.id; persist();
+        editingClassId = null; editingAbilityId = null; masterSection = null;
+        closeModal(); host(); renderMaster();
+      });
+      wrap.appendChild(b);
+    });
+    openModal({ title: 'Con quale campagna giochi?', bodyNode: wrap, actions: [{ label: 'Annulla', onClick: closeModal }] });
+  }
+
+  /* ---- Arsenale del Master (stessa creazione dei giocatori, niente equip) ---- */
+  function arsenalHost() {
+    var camp = masterCampaign();
+    camp.arsenal = Store.normalizeEquip(camp.arsenal || {});
+    return { sheet: { armamenti: camp.arsenal } };
+  }
+  function renderArsenal(body) {
+    var host = arsenalHost();
+    var ctx = { mode: 'arsenal', rerender: renderMaster };
+    if (!arsenalSub) {
+      body.appendChild(masterSubHead('Arsenale', '⚔️', function () { masterSection = null; renderMaster(); }));
+      var hint = document.createElement('p'); hint.className = 'muted'; hint.style.cssText = 'margin:0 2px 8px;font-size:.86rem;';
+      hint.textContent = 'Organizza gli oggetti e inviali ai giocatori durante la sessione.';
+      body.appendChild(hint);
+      var grid = document.createElement('div'); grid.className = 'home-nav';
+      ARM_CATS.forEach(function (cfg) {
+        var all = itemsByCat(host, cfg.cats);
+        var b = document.createElement('button'); b.className = 'home-btn';
+        b.innerHTML = '<span class="hb-ico">' + cfg.ico + '</span><span class="hb-lbl">' + cfg.label + '</span><span class="hb-sub">' + all.length + ' oggetti</span>';
+        b.addEventListener('click', function () { arsenalSub = cfg.key; renderMaster(); });
+        grid.appendChild(b);
+      });
+      body.appendChild(grid);
+      return;
+    }
+    var cfg = ARM_CATS.filter(function (x) { return x.key === arsenalSub; })[0] || ARM_CATS[0];
+    var head = document.createElement('div'); head.className = 'section-head';
+    head.innerHTML = '<h3>' + cfg.ico + ' ' + esc(cfg.label) + '</h3>';
+    head.appendChild(btn('‹ Arsenale', '', function () { arsenalSub = null; renderMaster(); }));
+    body.appendChild(head);
+    var create = btn('＋ Crea', 'primary', function () { createItemFlow(host, cfg.key, ctx); });
+    create.classList.add('equip-create');
+    body.appendChild(create);
+    var list = itemsByCat(host, cfg.cats);
+    if (list.length === 0) body.appendChild(emptyHint('Niente qui. Crea un oggetto con "Crea".'));
+    list.forEach(function (it) { body.appendChild(itemCard(host, it, ctx)); });
+  }
+  // Invia un oggetto dell'arsenale a uno o più giocatori collegati
+  function sendArsenalItem(it) {
+    if (typeof Net === 'undefined' || !Net.status().connected) { toast('Avvia prima la sessione', 'err'); return; }
+    var players = connectedPlayers();
+    if (!players.length) { toast('Nessun giocatore collegato', 'err'); return; }
+    var payload = Store.normalizeItem(it); payload.equipped = false; payload.id = undefined;
+    var wrap = document.createElement('div'); wrap.className = 'modal-list';
+    if (players.length > 1) {
+      var ball = document.createElement('button'); ball.className = 'modal-opt';
+      ball.innerHTML = '<span>📢 Tutti i giocatori</span>';
+      ball.addEventListener('click', function () {
+        players.forEach(function (p) { Net.pushEquip(p.id, payload); });
+        closeModal(); toast('Inviato a tutti', 'ok');
+      });
+      wrap.appendChild(ball);
+    }
+    players.forEach(function (p) {
+      var b = document.createElement('button'); b.className = 'modal-opt';
+      b.innerHTML = '<span>' + esc(p.charName || p.name) + '</span>' + (p.charName ? '<span class="mo-meta">' + esc(p.name) + '</span>' : '');
+      b.addEventListener('click', function () {
+        var ok = Net.pushEquip(p.id, payload);
+        closeModal(); toast(ok ? 'Inviato a ' + (p.charName || p.name) : 'Giocatore non collegato', ok ? 'ok' : 'err');
+      });
+      wrap.appendChild(b);
+    });
+    openModal({ title: 'Invia "' + esc(it.name || itemDefaultName(it)) + '" a…', bodyNode: wrap, actions: [{ label: 'Annulla', onClick: closeModal }] });
+  }
+
+  /* ---- Bestiario della campagna ---- */
+  function renderBestiary(body) {
+    var camp = masterCampaign();
+    body.appendChild(masterSubHead('Bestiario · ' + camp.name, '🐉'));
+    body.appendChild(btn('＋ Nuova creatura', 'primary', function () { creatureDialog(null); })).classList.add('equip-create');
+    if (camp.bestiary.length === 0) { body.appendChild(emptyHint('Nessuna creatura. Aggiungine una.')); return; }
+    camp.bestiary.forEach(function (m) {
+      var card = document.createElement('div'); card.className = 'panel-card creature-card';
+      var statsLine = Store.STAT_DEFS.filter(function (d) { return m.stats[d.abbr]; }).map(function (d) { return d.abbr + ' ' + m.stats[d.abbr]; }).join(' · ');
+      card.innerHTML =
+        (m.image ? '<img class="cr-img" src="' + m.image + '" alt="" />' : '') +
+        '<h4 class="tree-li-name">' + esc(m.name || 'Creatura') + '</h4>' +
+        '<p class="muted">❤️ ' + (m.hp || 0) + ' PF' + (statsLine ? ' · ' + statsLine : '') + '</p>' +
+        (m.note ? '<p class="cr-note">' + esc(m.note) + '</p>' : '');
+      var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;';
+      row.appendChild(btn('Modifica', '', function () { creatureDialog(m); }));
+      row.appendChild(btn('Elimina', 'danger', function () {
+        confirmDialog('Elimina creatura', 'Eliminare "' + (m.name || 'creatura') + '"?', 'Elimina', true).then(function (ok) {
+          if (!ok) return; camp.bestiary = camp.bestiary.filter(function (x) { return x.id !== m.id; }); persist(); renderMaster();
+        });
+      }));
+      card.appendChild(row);
+      body.appendChild(card);
+    });
+  }
+  function creatureDialog(m) {
+    var camp = masterCampaign();
+    var editing = !!m;
+    var imgData = m ? (m.image || null) : null;
+    var stats = {}; Store.STAT_DEFS.forEach(function (d) { stats[d.abbr] = m ? (m.stats[d.abbr] || 0) : 0; });
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    var statsGrid = Store.STAT_DEFS.map(function (d) {
+      return '<div class="cr-stat"><label>' + d.abbr + '</label><input data-stat="' + d.abbr + '" type="number" inputmode="numeric" value="' + stats[d.abbr] + '" /></div>';
+    }).join('');
+    wrap.innerHTML =
+      '<div class="field"><label>Nome</label><input id="cr-name" maxlength="50" /></div>' +
+      '<div class="field"><label>Punti Ferita (PF)</label><input id="cr-hp" type="number" inputmode="numeric" min="0" placeholder="0" /></div>' +
+      '<div class="field"><label>Statistiche</label><div class="cr-stats-grid">' + statsGrid + '</div></div>' +
+      '<div class="field"><label>Note</label><textarea id="cr-note" rows="3" maxlength="800" placeholder="Comportamento, attacchi, resistenze..."></textarea></div>' +
+      '<div class="field"><label>Immagine (opzionale)</label><div class="cr-img-row"><div class="cr-img-prev" id="cr-prev"></div>' +
+      '<button type="button" class="tool-btn" id="cr-img-btn">Scegli immagine</button>' +
+      '<button type="button" class="tool-btn" id="cr-img-clear" style="display:none">Rimuovi</button></div>' +
+      '<input type="file" id="cr-img-file" accept="image/*" hidden /></div>';
+    wrap.querySelector('#cr-name').value = m ? m.name : '';
+    wrap.querySelector('#cr-hp').value = m && m.hp ? m.hp : '';
+    wrap.querySelector('#cr-note').value = m ? m.note : '';
+    var prev = wrap.querySelector('#cr-prev'), clearBtn = wrap.querySelector('#cr-img-clear');
+    function refreshPrev() {
+      if (imgData) { prev.style.backgroundImage = 'url(' + imgData + ')'; prev.classList.add('has'); clearBtn.style.display = ''; }
+      else { prev.style.backgroundImage = ''; prev.classList.remove('has'); clearBtn.style.display = 'none'; }
+    }
+    refreshPrev();
+    wrap.querySelector('#cr-img-btn').addEventListener('click', function () { wrap.querySelector('#cr-img-file').click(); });
+    wrap.querySelector('#cr-img-file').addEventListener('change', function (e) {
+      var f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      processImage(f, 512, 0.82).then(function (url) { imgData = url; refreshPrev(); }).catch(function () { toast('Immagine non valida', 'err'); });
+    });
+    clearBtn.addEventListener('click', function () { imgData = null; refreshPrev(); });
+    function save() {
+      var name = wrap.querySelector('#cr-name').value.trim();
+      if (!name) { wrap.querySelector('#cr-name').focus(); toast('Dai un nome', 'err'); return; }
+      var st = {}; wrap.querySelectorAll('[data-stat]').forEach(function (i) { st[i.getAttribute('data-stat')] = parseInt(i.value, 10) || 0; });
+      var data = { id: m ? m.id : undefined, name: name, hp: parseInt(wrap.querySelector('#cr-hp').value, 10) || 0, stats: st, note: wrap.querySelector('#cr-note').value.trim(), image: imgData };
+      var nn = Store.normalizeCreature(data);
+      if (m) { var i = camp.bestiary.map(function (x) { return x.id; }).indexOf(m.id); camp.bestiary[i] = nn; }
+      else camp.bestiary.unshift(nn);
+      persist(); closeModal(); renderMaster();
+    }
+    openModal({ title: (editing ? 'Modifica creatura' : 'Nuova creatura'), bodyNode: wrap, focus: '#cr-name',
+      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Salva', cls: 'primary', onClick: save }] });
+  }
+
+  /* ---- Note della campagna (testo libero, autosalvataggio) ---- */
+  function renderCampaignNotes(body) {
+    var camp = masterCampaign();
+    body.appendChild(masterSubHead('Note · ' + camp.name, '📝'));
+    var ta = document.createElement('textarea'); ta.className = 'field note-area';
+    ta.placeholder = 'Trama, PNG, segreti, agganci, ricompense... tutto ciò che ti serve per questa campagna.';
+    ta.value = camp.notes || '';
+    var t;
+    ta.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { camp.notes = ta.value; persist(); }, 350); });
+    var wrap = document.createElement('div'); wrap.className = 'field'; wrap.appendChild(ta);
+    body.appendChild(wrap);
   }
 
   /* ---- Vista SESSIONE ---- */
@@ -2210,15 +2486,27 @@
     }
   }
 
+  /* ---- Campagne del Master (contenitore di classi, bestiario, note, arsenale) ---- */
+  function masterCampaign() {
+    if (!state.master || !Array.isArray(state.master.campaigns) || !state.master.campaigns.length) {
+      state.master = Store.ensureMaster(state.master || {});
+    }
+    var id = state.master.currentCampaignId;
+    var camp = state.master.campaigns.filter(function (x) { return x.id === id; })[0];
+    if (!camp) { camp = state.master.campaigns[0]; state.master.currentCampaignId = camp.id; }
+    return camp;
+  }
+  function masterClasses() { return masterCampaign().classes; }
+
   /* ---- Editor abilità (Master): Classi → Abilità → Albero di nodi ---- */
   function connectedPlayers() { return (netMembers || []).filter(function (m) { return m.role === 'player'; }); }
-  function getClass(id) { return (state.master.classes || []).filter(function (x) { return x.id === id; })[0]; }
+  function getClass(id) { return masterClasses().filter(function (x) { return x.id === id; })[0]; }
   function getAbilityIn(cls, id) { return (cls.abilities || []).filter(function (a) { return a.id === id; })[0]; }
 
   function renderAbilityEditor() {
     var body = $('#ability-editor-body'); if (!body) return;
     body.innerHTML = '';
-    if (!state.master.classes) state.master.classes = [];
+    masterCampaign(); // assicura la struttura a campagne
     if (editingClassId) {
       var cls = getClass(editingClassId);
       if (!cls) { editingClassId = null; editingAbilityId = null; return renderAbilityEditor(); }
@@ -2237,10 +2525,10 @@
   // Livello 1 — elenco classi (cartelle)
   function renderClassList(body) {
     var head = document.createElement('div'); head.className = 'panel-card';
-    head.innerHTML = '<h3>Classi</h3><p class="muted">Le classi sono cartelle per organizzare le abilità. Crea una classe, poi al suo interno le abilità (ognuna con il proprio albero).</p>';
+    head.innerHTML = '<h3>Classi · ' + esc(masterCampaign().name) + '</h3><p class="muted">Le classi sono cartelle per organizzare le abilità. Crea una classe, poi al suo interno le abilità (ognuna con il proprio albero).</p>';
     head.appendChild(btn('＋ Nuova classe', 'primary', newClassDialog));
     body.appendChild(head);
-    var classes = state.master.classes;
+    var classes = masterClasses();
     if (classes.length === 0) { body.appendChild(emptyHint('Nessuna classe. Creane una con “Nuova classe”.')); return; }
     classes.forEach(function (cls) {
       var card = document.createElement('div'); card.className = 'panel-card';
@@ -2251,7 +2539,7 @@
       row.appendChild(btn('Rinomina', '', function () { renameClassDialog(cls); }));
       row.appendChild(btn('Elimina', 'danger', function () {
         confirmDialog('Elimina classe', 'Eliminare la classe "' + cls.name + '" e tutte le sue abilità?', 'Elimina', true).then(function (ok) {
-          if (!ok) return; state.master.classes = classes.filter(function (x) { return x.id !== cls.id; }); persist(); renderAbilityEditor();
+          if (!ok) return; masterCampaign().classes = classes.filter(function (x) { return x.id !== cls.id; }); persist(); renderAbilityEditor();
         });
       }));
       card.appendChild(row);
@@ -2262,7 +2550,7 @@
   function newClassDialog() {
     twoFieldDialog('Nuova classe', 'Nome', 'Es. Guerriero', 'Descrizione', 'Note sulla classe...', function (name, desc) {
       var cls = Store.normalizeClass({ name: name, desc: desc, abilities: [] });
-      state.master.classes.unshift(cls); persist(); editingClassId = cls.id; editingAbilityId = null; renderAbilityEditor();
+      masterClasses().unshift(cls); persist(); editingClassId = cls.id; editingAbilityId = null; renderAbilityEditor();
     }, '', '', true);
   }
   function renameClassDialog(cls) {

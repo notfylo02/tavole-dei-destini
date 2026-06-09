@@ -10,7 +10,7 @@
   var VERSION = 1;
 
   function emptyState() {
-    return { version: VERSION, characters: [], folders: [], master: {} };
+    return { version: VERSION, characters: [], folders: [], master: ensureMaster({}) };
   }
 
   // Statistiche standard del gioco (definite dal Master)
@@ -237,6 +237,53 @@
     };
   }
 
+  /* ---------- Campagne del Master ---------- */
+  // Creatura del bestiario: nome, PF, le 9 statistiche, note, immagine opzionale
+  function normalizeCreature(m) {
+    m = m || {};
+    var stats = {};
+    var src = m.stats || {};
+    STAT_DEFS.forEach(function (d) { stats[d.abbr] = intOr0(src[d.abbr]); });
+    return {
+      id: m.id || genId(),
+      name: typeof m.name === 'string' ? m.name : '',
+      hp: Math.max(0, intOr0(m.hp)),
+      stats: stats,
+      note: typeof m.note === 'string' ? m.note : '',
+      image: typeof m.image === 'string' ? m.image : null
+    };
+  }
+  // Campagna: contenitore di classi, bestiario, note e arsenale
+  function normalizeCampaign(c) {
+    c = c || {};
+    return {
+      id: c.id || genId(),
+      name: typeof c.name === 'string' && c.name ? c.name : 'Campagna',
+      desc: typeof c.desc === 'string' ? c.desc : '',
+      classes: Array.isArray(c.classes) ? c.classes.map(normalizeClass) : [],
+      bestiary: Array.isArray(c.bestiary) ? c.bestiary.map(normalizeCreature) : [],
+      notes: typeof c.notes === 'string' ? c.notes : '',
+      arsenal: normalizeEquip(c.arsenal || {})
+    };
+  }
+  // Garantisce la struttura a campagne del Master, migrando i vecchi dati.
+  function ensureMaster(master) {
+    master = master || {};
+    if (Array.isArray(master.campaigns)) {
+      master.campaigns = master.campaigns.map(normalizeCampaign);
+    } else {
+      // migrazione: le vecchie classi diventano la "Campagna principale"
+      var classes = Array.isArray(master.classes) ? master.classes.map(normalizeClass) : [];
+      master.campaigns = [normalizeCampaign({ name: 'Campagna principale', classes: classes })];
+    }
+    if (master.campaigns.length === 0) master.campaigns = [normalizeCampaign({ name: 'Campagna principale' })];
+    var ids = master.campaigns.map(function (x) { return x.id; });
+    if (ids.indexOf(master.currentCampaignId) < 0) master.currentCampaignId = master.campaigns[0].id;
+    delete master.classes;
+    delete master.trees;
+    return master;
+  }
+
   // Converte eventuali vecchie voci piatte {id,name,desc} in un albero unico.
   function migrateAbilita(arr) {
     if (!Array.isArray(arr) || arr.length === 0) return [];
@@ -265,16 +312,14 @@
       data.characters = Array.isArray(data.characters) ? data.characters : [];
       data.folders = Array.isArray(data.folders) ? data.folders : [];
       data.master = data.master || {};
-      // Gerarchia: master.classes = [{ id, name, desc, abilities:[ability] }]
-      if (Array.isArray(data.master.classes)) {
-        data.master.classes = data.master.classes.map(normalizeClass);
-      } else if (Array.isArray(data.master.trees) && data.master.trees.length) {
-        // migrazione: i vecchi alberi diventano abilità in una classe "Generale"
-        data.master.classes = [normalizeClass({ name: 'Generale', abilities: data.master.trees })];
-      } else {
-        data.master.classes = [];
+      // Migrazione storica: vecchi alberi piatti → classi, prima di passare alle campagne
+      if (!Array.isArray(data.master.campaigns)) {
+        if (!Array.isArray(data.master.classes) && Array.isArray(data.master.trees) && data.master.trees.length) {
+          data.master.classes = [normalizeClass({ name: 'Generale', abilities: data.master.trees })];
+        }
       }
-      delete data.master.trees;
+      // Struttura a campagne (contiene classi, bestiario, note, arsenale)
+      data.master = ensureMaster(data.master);
       // normalizza schede mancanti
       data.characters.forEach(function (c) {
         c.sheet = mergeSheet(c.sheet);
@@ -335,6 +380,11 @@
       { kind: 'tdd-character', version: VERSION, character: stripChar(char) });
   }
 
+  function exportCampaign(camp) {
+    download('campagna-' + slug(camp.name) + '.json',
+      { kind: 'tdd-campaign', version: VERSION, campaign: normalizeCampaign(camp) });
+  }
+
   // copia pulita senza folderId/posizione, mantenendo i dati di gioco
   function stripChar(char) {
     return {
@@ -371,6 +421,10 @@
     normalizeTree: normalizeTree,
     normalizeAbility: normalizeAbility,
     normalizeClass: normalizeClass,
+    normalizeCampaign: normalizeCampaign,
+    normalizeCreature: normalizeCreature,
+    ensureMaster: ensureMaster,
+    exportCampaign: exportCampaign,
     normalizeNode: normalizeNode,
     normalizeLink: normalizeLink,
     normalizeEquip: normalizeEquip,

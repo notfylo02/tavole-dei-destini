@@ -847,6 +847,31 @@ body::after {
 .cc-bonus .bn-total { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; color: var(--text); font-weight: 600; }
 .cc-bonus .bn-eff { margin-top: 6px; font-size: .92rem; }
 
+/* arsenale: icona guida e pulsante invia sulle card */
+.item-card .ic-lead { flex: none; width: 40px; text-align: center; font-size: 1.4rem; }
+.item-card .ic-send { flex: none; width: 36px; height: 36px; border: none; background: none; cursor: pointer;
+  color: var(--accent-3); font-size: 1.1rem; transition: transform .15s var(--ease-back); }
+.item-card .ic-send:active { transform: scale(.85); }
+
+/* selettore + gestione campagne */
+.campaign-card .camp-select { width: 100%; margin-top: 6px; font-size: 1rem; font-weight: 600; }
+.camp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.camp-actions .tool-btn { padding: 7px 12px; font-size: .85rem; }
+
+/* bestiario */
+.creature-card .cr-img { width: 100%; max-height: 180px; object-fit: cover; border-radius: var(--radius-sm);
+  margin-bottom: 8px; border: 1px solid var(--line); }
+.creature-card .cr-note { margin: 6px 0 0; font-size: .9rem; color: var(--text-dim); white-space: pre-wrap; }
+.cr-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cr-stat { display: flex; flex-direction: column; gap: 3px; }
+.cr-stat label { font-size: .72rem; font-weight: 700; color: var(--accent-3); text-align: center; }
+.cr-stat input { width: 100%; padding: 8px 4px; text-align: center; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--bg-2); color: var(--text); font-family: inherit; }
+.cr-img-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cr-img-prev { width: 64px; height: 64px; border-radius: var(--radius-sm); border: 1px dashed var(--line-strong);
+  background-size: cover; background-position: center; flex: none; }
+.cr-img-prev.has { border-style: solid; border-color: var(--accent-2); }
+
 /* ============================================================
    Animazioni di ingresso (cascata) per le sezioni
    ============================================================ */
