@@ -101,6 +101,8 @@
       emit('tree-progress', { from: conn.peer, treeId: d.treeId, ranks: d.ranks || {}, points: d.points, charName: d.charName || '' });
     } else if (d.t === 'fight-init') {
       emit('fight-init', { from: conn.peer, value: d.value, charName: d.charName || '' });
+    } else if (d.t === 'fight-hp') {
+      emit('fight-hp', { from: conn.peer, hp: d.hp, maxHp: d.maxHp });
     }
   }
 
@@ -171,7 +173,7 @@
     else if (d.t === 'equip-push') { emit('equip-push', { item: d.item }); }
     else if (d.t === 'fight-start') { emit('fight-start', {}); }
     else if (d.t === 'fight-end') { emit('fight-end', {}); }
-    else if (d.t === 'fight-order') { emit('fight-order', { order: d.order || [] }); }
+    else if (d.t === 'fight-order') { emit('fight-order', { order: d.order || [], turn: d.turn || 0 }); }
   }
 
   /* ===================== INVIO (condiviso) ===================== */
@@ -254,15 +256,20 @@
     if (role !== 'master') return;
     Object.keys(conns).forEach(function (id) { safeSend(conns[id], { t: 'fight-end' }); });
   }
-  // Master → tutti: condivide l'ordine di iniziativa.
-  function broadcastFightOrder(order) {
+  // Master → tutti: condivide l'ordine di iniziativa + turno corrente.
+  function broadcastFightOrder(order, turn) {
     if (role !== 'master' || !connected) return;
-    Object.keys(conns).forEach(function (id) { safeSend(conns[id], { t: 'fight-order', order: order || [] }); });
+    Object.keys(conns).forEach(function (id) { safeSend(conns[id], { t: 'fight-order', order: order || [], turn: turn || 0 }); });
   }
   // Player → master: comunica la propria iniziativa.
   function sendInitiative(value, charName) {
     if (role !== 'player' || !connected) return;
     safeSend(conns.master, { t: 'fight-init', value: value, charName: charName || '' });
+  }
+  // Player → master: aggiorna i propri PF (correnti e massimi).
+  function sendHp(hp, maxHp) {
+    if (role !== 'player' || !connected) return;
+    safeSend(conns.master, { t: 'fight-hp', hp: hp, maxHp: maxHp });
   }
 
   /* ===================== roster / membri ===================== */
@@ -306,7 +313,7 @@
     broadcastImage: broadcastImage, closeImage: closeImage,
     pushTree: pushTree, unlockNode: unlockNode, grantPoints: grantPoints, pushEquip: pushEquip,
     whoami: whoami, sendProgress: sendProgress,
-    startFight: startFight, endFight: endFight, broadcastFightOrder: broadcastFightOrder, sendInitiative: sendInitiative,
+    startFight: startFight, endFight: endFight, broadcastFightOrder: broadcastFightOrder, sendInitiative: sendInitiative, sendHp: sendHp,
     leave: leave, status: status, available: available, myId: myId
   };
   global.Net = Net;

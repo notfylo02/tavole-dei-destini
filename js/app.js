@@ -34,7 +34,7 @@
   var linkFrom = null;          // editor albero: prima bolla selezionata per il collegamento
   var masterProgress = {};      // progressi ricevuti: { memberId: {treeId,ranks,points,charName} }
   // Combattimento (Fight)
-  var fight = { ongoing: false, myInit: null, enemies: [], inits: {}, order: [] };
+  var fight = { ongoing: false, myInit: null, turn: 0, round: 1, enemies: [], inits: {}, order: [] };
 
   function showView(name, isBack) {
     var next = document.getElementById('view-' + name);
@@ -2021,12 +2021,20 @@
     });
     Net.on('fight-init', function (d) {
       if (appRole !== 'master') return;
-      fight.inits[d.from] = { name: d.charName || rosterNameFor(d.from), value: d.value };
+      var ex = fight.inits[d.from] || {};
+      fight.inits[d.from] = { name: d.charName || rosterNameFor(d.from), value: d.value, hp: ex.hp || 0, maxHp: ex.maxHp || 0 };
       recomputeOrderAndBroadcast();
       if (currentView === 'fight') renderFight();
       toast((d.charName || 'Un giocatore') + ': iniziativa ' + d.value, 'ok');
     });
-    Net.on('fight-order', function (d) { fight.order = d.order || []; if (currentView === 'fight') renderFight(); });
+    Net.on('fight-hp', function (d) {
+      if (appRole !== 'master') return;
+      var ex = fight.inits[d.from] || { name: rosterNameFor(d.from), value: 0 };
+      ex.hp = d.hp || 0; ex.maxHp = d.maxHp || 0; fight.inits[d.from] = ex;
+      recomputeOrderAndBroadcast();
+      if (currentView === 'fight') renderFight();
+    });
+    Net.on('fight-order', function (d) { fight.order = d.order || []; fight.turn = d.turn || 0; if (currentView === 'fight') renderFight(); });
     Net.on('fight-end', function () {
       fight.ongoing = false; fight.myInit = null; fight.inits = {}; fight.order = [];
       var inv = $('#fight-invite'); if (inv) inv.hidden = true;
@@ -2469,20 +2477,37 @@
   }
   function computeFightOrder() {
     var arr = [];
-    Object.keys(fight.inits).forEach(function (id) { var e = fight.inits[id]; arr.push({ name: e.name || rosterNameFor(id), value: e.value, kind: 'player' }); });
-    fight.enemies.forEach(function (en) { arr.push({ name: en.name, value: en.init, kind: 'enemy' }); });
+    Object.keys(fight.inits).forEach(function (id) {
+      var e = fight.inits[id];
+      arr.push({ id: id, name: e.name || rosterNameFor(id), value: e.value, kind: 'player', hp: e.hp || 0, maxHp: e.maxHp || 0 });
+    });
+    fight.enemies.forEach(function (en) {
+      arr.push({ id: en.id, name: en.name, value: en.init, kind: 'enemy', hp: en.hp || 0, maxHp: en.maxHp || 0 });
+    });
     arr.sort(function (a, b) { return (b.value || 0) - (a.value || 0); });
     return arr;
   }
   function recomputeOrderAndBroadcast() {
     fight.order = computeFightOrder();
-    if (appRole === 'master' && Net.status().connected) Net.broadcastFightOrder(fight.order);
+    if (fight.turn >= fight.order.length) fight.turn = Math.max(0, fight.order.length - 1);
+    if (appRole === 'master' && Net.status().connected) Net.broadcastFightOrder(fight.order, fight.turn);
+  }
+  function combatantRef(id) {
+    if (fight.inits[id]) return { ref: fight.inits[id], kind: 'player' };
+    var en = fight.enemies.filter(function (x) { return x.id === id; })[0];
+    if (en) return { ref: en, kind: 'enemy' };
+    return null;
+  }
+  function hpText(o) { return o.maxHp ? (o.hp + '/' + o.maxHp) : (o.hp != null ? String(o.hp) : '—'); }
+  function paintHp(id, txt) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-cid="' + id + '"] .init-hp'), function (e) { e.textContent = '❤️ ' + txt; });
+    Array.prototype.forEach.call(document.querySelectorAll('[data-cid="' + id + '"] .hp-cur'), function (e) { e.textContent = txt; });
   }
 
   // MASTER: avvia il combattimento
   function startFightFlow() {
     if (typeof Net === 'undefined' || !Net.status().connected) { toast('Avvia prima la sessione', 'err'); return; }
-    fight.ongoing = true; fight.inits = {}; fight.order = [];
+    fight.ongoing = true; fight.inits = {}; fight.enemies = []; fight.order = []; fight.turn = 0; fight.round = 1;
     Net.startFight();
     recomputeOrderAndBroadcast();
     navTo('fight');
@@ -2492,15 +2517,24 @@
     confirmDialog('Termina combattimento', 'Vuoi terminare il combattimento per tutti?', 'Termina', true).then(function (ok) {
       if (!ok) return;
       Net.endFight();
-      fight.ongoing = false; fight.myInit = null; fight.inits = {}; fight.enemies = []; fight.order = [];
+      fight.ongoing = false; fight.myInit = null; fight.inits = {}; fight.enemies = []; fight.order = []; fight.turn = 0; fight.round = 1;
       navTo('master');
     });
   }
-
-  function showFightInvite() {
-    var inv = $('#fight-invite'); if (!inv) return;
-    inv.hidden = false;
+  function nextTurn() {
+    if (!fight.order.length) return;
+    fight.turn++;
+    if (fight.turn >= fight.order.length) { fight.turn = 0; fight.round++; }
+    recomputeOrderAndBroadcast(); renderFight();
   }
+  function prevTurn() {
+    if (!fight.order.length) return;
+    fight.turn--;
+    if (fight.turn < 0) { fight.turn = fight.order.length - 1; if (fight.round > 1) fight.round--; }
+    recomputeOrderAndBroadcast(); renderFight();
+  }
+
+  function showFightInvite() { var inv = $('#fight-invite'); if (inv) inv.hidden = false; }
 
   function renderFight() {
     var body = $('#fight-body'); if (!body) return;
@@ -2509,81 +2543,137 @@
     else renderFightPlayer(body);
   }
 
-  function orderList(order) {
-    var box = document.createElement('div'); box.className = 'init-order';
-    if (!order || !order.length) { box.appendChild(emptyHint('Ancora nessuna iniziativa.')); return box; }
-    order.forEach(function (o, i) {
-      var row = document.createElement('div'); row.className = 'init-row ' + (o.kind === 'enemy' ? 'is-enemy' : 'is-player');
-      row.innerHTML = '<span class="init-pos">' + (i + 1) + '</span>' +
-        '<span class="init-ico">' + (o.kind === 'enemy' ? '👹' : '⚔️') + '</span>' +
-        '<span class="init-name">' + esc(o.name) + '</span>' +
-        '<span class="init-val">' + (o.value != null ? o.value : '—') + '</span>';
-      box.appendChild(row);
-    });
+  // dettaglio di un nemico (stat + abilità + note)
+  function enemyDetailHtml(en) {
+    var statsLine = Store.STAT_DEFS.filter(function (d) { return en.stats && en.stats[d.abbr]; }).map(function (d) { return d.abbr + ' ' + en.stats[d.abbr]; }).join(' · ');
+    var html = '';
+    if (statsLine) html += '<div class="id-meta"><span>' + statsLine + '</span></div>';
+    if (en.abilities && en.abilities.length) html += '<div class="id-abils">' + en.abilities.map(function (a) { var el = effLabel(a); return '<div class="id-ab"><b>' + esc(a.name || 'Abilità') + '</b>' + (el ? ' · ' + esc(el) : '') + (a.countdown ? ' · ⏳' + a.countdown : '') + (a.note ? '<div class="id-ab-note">' + esc(a.note) + '</div>' : '') + '</div>'; }).join('') + '</div>';
+    if (en.note) html += '<p class="id-note">' + esc(en.note) + '</p>';
+    return html;
+  }
+
+  // una riga combattente (apribile per dettagli + PF)
+  function buildCombatantRow(o, index, buildDetail) {
+    var wrap = document.createElement('div'); wrap.className = 'cmb-wrap'; wrap.setAttribute('data-cid', o.id);
+    var row = document.createElement('button');
+    row.className = 'init-row ' + (o.kind === 'enemy' ? 'is-enemy' : 'is-player') + (index === fight.turn ? ' is-turn' : '');
+    row.innerHTML = '<span class="init-pos">' + (index + 1) + '</span>' +
+      '<span class="init-ico">' + (o.kind === 'enemy' ? '👹' : '⚔️') + '</span>' +
+      '<span class="init-name">' + esc(o.name) + '</span>' +
+      '<span class="init-hp">❤️ ' + hpText(o) + '</span>' +
+      '<span class="init-val">' + (o.value != null ? o.value : '—') + '</span>' +
+      '<span class="eq-ov-chev">▾</span>';
+    var det = document.createElement('div'); det.className = 'cmb-det'; det.hidden = true;
+    buildDetail(o, det);
+    row.addEventListener('click', function () { det.hidden = !det.hidden; wrap.classList.toggle('open', !det.hidden); });
+    wrap.appendChild(row); wrap.appendChild(det);
+    return wrap;
+  }
+
+  // editor PF (riusato): onDelta(d), onMax(v)
+  function hpEditorNode(o, onDelta, onMax) {
+    var box = document.createElement('div'); box.className = 'hp-edit';
+    box.innerHTML =
+      '<div class="hp-row"><span>PF: <b class="hp-cur">' + hpText(o) + '</b></span></div>' +
+      '<div class="hp-row"><input class="hp-delta" type="number" inputmode="numeric" placeholder="quantità" />' +
+      '<button class="tool-btn hp-dmg">− Danno</button><button class="tool-btn hp-heal">＋ Cura</button></div>' +
+      '<div class="hp-row"><label class="hp-maxlbl">PF max</label><input class="hp-max" type="number" inputmode="numeric" value="' + (o.maxHp || '') + '" /></div>';
+    box.querySelector('.hp-dmg').addEventListener('click', function () { var d = parseInt(box.querySelector('.hp-delta').value, 10) || 0; if (d) onDelta(-d); box.querySelector('.hp-delta').value = ''; });
+    box.querySelector('.hp-heal').addEventListener('click', function () { var d = parseInt(box.querySelector('.hp-delta').value, 10) || 0; if (d) onDelta(d); box.querySelector('.hp-delta').value = ''; });
+    box.querySelector('.hp-max').addEventListener('change', function () { onMax(parseInt(this.value, 10) || 0); });
     return box;
+  }
+
+  function masterChangeHp(id, delta) {
+    var info = combatantRef(id); if (!info) return; var r = info.ref;
+    var max = r.maxHp || 0; r.hp = (r.hp || 0) + delta;
+    if (r.hp < 0) r.hp = 0; if (max && r.hp > max) r.hp = max;
+    paintHp(id, hpText(r)); recomputeOrderAndBroadcast();
+  }
+  function masterSetMax(id, val) {
+    var info = combatantRef(id); if (!info) return; var r = info.ref;
+    r.maxHp = Math.max(0, val);
+    if (r.maxHp && (r.hp || 0) > r.maxHp) r.hp = r.maxHp;
+    if (!r.hp && r.maxHp) r.hp = r.maxHp;
+    recomputeOrderAndBroadcast(); renderFight();
   }
 
   function renderFightMaster(body) {
     var st = Net.status();
+    fight.order = computeFightOrder();
+
     var top = document.createElement('div'); top.className = 'panel-card';
-    top.innerHTML = '<h3>⚔️ Combattimento</h3><p class="muted">I giocatori tirano (o inseriscono) l\'iniziativa. Aggiungi i nemici e tira per loro col d100.</p>';
+    top.innerHTML = '<h3>⚔️ Combattimento</h3><p class="muted">Tocca un combattente per i dettagli e per modificarne i PF.</p>';
     var acts = document.createElement('div'); acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;';
+    acts.appendChild(btn('＋ Nemico', 'primary', addEnemyDialog));
     acts.appendChild(btn('📣 Re-invita', '', function () { if (Net.startFight()) toast('Invito rinviato', 'ok'); }));
     acts.appendChild(btn('🖼️ Immagine', '', pickBroadcastImage));
     acts.appendChild(btn('Termina', 'danger', endFightFlow));
     top.appendChild(acts);
     body.appendChild(top);
 
-    // Nemici del master
-    var enemCard = document.createElement('div'); enemCard.className = 'panel-card';
-    enemCard.innerHTML = '<h3>👹 Nemici</h3>';
-    enemCard.appendChild(btn('＋ Nemico', 'primary', addEnemyDialog)).classList.add('equip-create');
-    if (!fight.enemies.length) { var ph = document.createElement('p'); ph.className = 'muted'; ph.style.margin = '4px 2px 0'; ph.textContent = 'Nessun nemico in campo.'; enemCard.appendChild(ph); }
-    fight.enemies.forEach(function (en) {
-      var r = document.createElement('div'); r.className = 'entry';
-      r.innerHTML = '<span class="e-val">' + en.init + '</span><div class="e-main"><div class="e-name">' + esc(en.name) + '</div></div>' +
-        '<button class="b-del" aria-label="Rimuovi">×</button>';
-      r.querySelector('.b-del').addEventListener('click', function () {
-        fight.enemies = fight.enemies.filter(function (x) { return x.id !== en.id; });
-        recomputeOrderAndBroadcast(); renderFight();
-      });
-      enemCard.appendChild(r);
-    });
-    body.appendChild(enemCard);
+    // barra turno
+    if (fight.order.length) {
+      var tb = document.createElement('div'); tb.className = 'turn-bar';
+      var prev = btn('‹', '', prevTurn);
+      var cur = fight.order[fight.turn] || fight.order[0];
+      var label = document.createElement('div'); label.className = 'turn-label';
+      label.innerHTML = '<span class="tl-name">' + esc(cur.name) + '</span><span class="tl-round">Round ' + fight.round + '</span>';
+      var next = btn('Turno ›', 'primary', nextTurn);
+      tb.appendChild(prev); tb.appendChild(label); tb.appendChild(next);
+      body.appendChild(tb);
+    }
 
-    // Ordine + attesa
-    var ord = document.createElement('div'); ord.className = 'panel-card';
-    ord.innerHTML = '<h3>🎯 Ordine di iniziativa</h3>';
-    ord.appendChild(orderList(computeFightOrder()));
+    var card = document.createElement('div'); card.className = 'panel-card';
+    card.innerHTML = '<h3>🎯 Ordine di iniziativa</h3>';
+    if (!fight.order.length) card.appendChild(emptyHint('Ancora nessun combattente.'));
+    fight.order.forEach(function (o, i) {
+      card.appendChild(buildCombatantRow(o, i, function (oo, det) {
+        if (oo.kind === 'enemy') { var en = fight.enemies.filter(function (x) { return x.id === oo.id; })[0]; if (en) det.innerHTML = enemyDetailHtml(en); }
+        det.appendChild(hpEditorNode(oo, function (d) { masterChangeHp(oo.id, d); }, function (v) { masterSetMax(oo.id, v); }));
+        if (oo.kind === 'enemy') det.appendChild(btn('🗑 Rimuovi nemico', 'danger', function () {
+          fight.enemies = fight.enemies.filter(function (x) { return x.id !== oo.id; });
+          recomputeOrderAndBroadcast(); renderFight();
+        }));
+      }));
+    });
     var waiting = (st.members || []).filter(function (m) { return m.role === 'player' && !fight.inits[m.id]; });
     if (waiting.length) {
       var w = document.createElement('p'); w.className = 'muted'; w.style.marginTop = '8px';
       w.textContent = 'In attesa: ' + waiting.map(function (m) { return m.charName || m.name; }).join(', ');
-      ord.appendChild(w);
+      card.appendChild(w);
     }
-    body.appendChild(ord);
+    body.appendChild(card);
   }
 
   function addEnemyDialog() {
     var camp = masterCampaign();
+    var chosen = null;
     var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
     var bestOpts = '<option value="">— dal bestiario —</option>' + camp.bestiary.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name || 'Creatura') + '</option>'; }).join('');
     wrap.innerHTML =
       (camp.bestiary.length ? '<div class="field"><label>Dal bestiario</label><select id="en-best" class="eq-select">' + bestOpts + '</select></div>' : '') +
       '<div class="field"><label>Nome</label><input id="en-name" maxlength="40" placeholder="Es. Goblin" /></div>' +
-      '<div class="field"><label>Iniziativa</label><div class="init-input"><input id="en-init" type="number" inputmode="numeric" min="0" placeholder="0" /><button type="button" class="tool-btn" id="en-d100">🎲 d100</button></div></div>';
+      '<div class="field-row">' +
+      '<div class="field"><label>Iniziativa</label><div class="init-input"><input id="en-init" type="number" inputmode="numeric" min="0" placeholder="0" /><button type="button" class="tool-btn" id="en-d100">🎲</button></div></div>' +
+      '<div class="field"><label>PF</label><input id="en-hp" type="number" inputmode="numeric" min="0" placeholder="0" /></div>' +
+      '</div>';
     var bsel = wrap.querySelector('#en-best');
     if (bsel) bsel.addEventListener('change', function () {
       var id = this.value;
-      var m = camp.bestiary.filter(function (x) { return x.id === id; })[0];
-      if (m) wrap.querySelector('#en-name').value = m.name || '';
+      chosen = camp.bestiary.filter(function (x) { return x.id === id; })[0] || null;
+      if (chosen) { wrap.querySelector('#en-name').value = chosen.name || ''; wrap.querySelector('#en-hp').value = chosen.hp || ''; }
     });
     wrap.querySelector('#en-d100').addEventListener('click', function () { wrap.querySelector('#en-init').value = rollD100(); });
     function save() {
       var name = wrap.querySelector('#en-name').value.trim();
       if (!name) { wrap.querySelector('#en-name').focus(); toast('Dai un nome', 'err'); return; }
       var init = parseInt(wrap.querySelector('#en-init').value, 10); if (isNaN(init)) init = 0;
-      fight.enemies.push({ id: Store.genId(), name: name, init: init });
+      var hp = parseInt(wrap.querySelector('#en-hp').value, 10) || 0;
+      var en = { id: Store.genId(), name: name, init: init, hp: hp, maxHp: hp, stats: null, abilities: [], note: '' };
+      if (chosen) { en.stats = chosen.stats; en.abilities = chosen.abilities || []; en.note = chosen.note || ''; }
+      fight.enemies.push(en);
       recomputeOrderAndBroadcast(); closeModal(); renderFight();
     }
     openModal({ title: 'Aggiungi nemico', bodyNode: wrap, focus: '#en-name',
@@ -2604,14 +2694,28 @@
       body.appendChild(card);
       return;
     }
-    var mine = document.createElement('div'); mine.className = 'panel-card';
-    mine.innerHTML = '<h3>La tua iniziativa</h3><div class="my-init">' + fight.myInit + '</div>';
-    mine.appendChild(btn('↻ Ritira', '', function () { fight.myInit = null; renderFight(); }));
-    body.appendChild(mine);
+    var myId = Net.myId();
     var ord = document.createElement('div'); ord.className = 'panel-card';
     ord.innerHTML = '<h3>🎯 Ordine di iniziativa</h3>';
-    ord.appendChild(orderList(fight.order));
+    if (!fight.order.length) ord.appendChild(emptyHint('In attesa dell\'ordine dal Master.'));
+    fight.order.forEach(function (o, i) {
+      ord.appendChild(buildCombatantRow(o, i, function (oo, det) {
+        if (oo.id === myId) {
+          det.appendChild(hpEditorNode(oo, function (d) { playerChangeHp(oo, d); }, function (v) { playerSetMax(oo, v); }));
+        } else {
+          det.innerHTML = '<p class="muted" style="margin:0">PF: ' + hpText(oo) + (oo.value != null ? ' · Iniziativa ' + oo.value : '') + '</p>';
+        }
+      }));
+    });
     body.appendChild(ord);
+  }
+  function playerChangeHp(o, delta) {
+    o.hp = (o.hp || 0) + delta; if (o.hp < 0) o.hp = 0; if (o.maxHp && o.hp > o.maxHp) o.hp = o.maxHp;
+    paintHp(o.id, hpText(o)); Net.sendHp(o.hp, o.maxHp || 0);
+  }
+  function playerSetMax(o, val) {
+    o.maxHp = Math.max(0, val); if (o.maxHp && (o.hp || 0) > o.maxHp) o.hp = o.maxHp; if (!o.hp && o.maxHp) o.hp = o.maxHp;
+    Net.sendHp(o.hp || 0, o.maxHp); renderFight();
   }
   function setMyInit(v) {
     fight.myInit = v;

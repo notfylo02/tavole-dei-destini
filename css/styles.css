@@ -768,6 +768,37 @@ body::after {
 .init-ico { font-size: 1.2rem; flex: none; }
 .init-name { flex: 1; min-width: 0; font-weight: 600; }
 .init-val { flex: none; font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.2rem; color: var(--accent-3); }
+.init-hp { flex: none; font-size: .82rem; color: var(--text-dim); white-space: nowrap; }
+/* barra turno */
+.turn-bar { display: flex; align-items: center; gap: 10px; margin: 0 2px 14px; padding: 10px 12px;
+  border: 1px solid var(--accent-2); border-radius: var(--radius); background: linear-gradient(155deg, #2c1e10, var(--surface));
+  box-shadow: 0 0 16px var(--glow); }
+.turn-bar .tool-btn { flex: none; }
+.turn-label { flex: 1; min-width: 0; text-align: center; display: flex; flex-direction: column; }
+.turn-label .tl-name { font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.1rem; color: var(--accent-3); }
+.turn-label .tl-round { font-size: .74rem; color: var(--text-dim); }
+/* combattente espandibile */
+.cmb-wrap { margin-bottom: 8px; }
+.cmb-wrap .init-row { width: 100%; cursor: pointer; border: 1px solid var(--line); font-family: inherit; color: var(--text); text-align: left; }
+.cmb-wrap.open .init-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.init-row.is-enemy { border-color: var(--blood); background: linear-gradient(150deg, #2a1212, var(--surface)); }
+.init-row.is-player { border-color: var(--accent-2); }
+.init-row.is-turn { box-shadow: 0 0 0 2px var(--accent-3), 0 0 16px var(--glow); }
+.init-row.is-turn .init-pos { background: var(--accent-2); color: #1a1206; }
+.cmb-wrap .eq-ov-chev { flex: none; color: var(--text-faint); transition: transform .2s; }
+.cmb-wrap.open .eq-ov-chev { transform: rotate(180deg); color: var(--accent-3); }
+.cmb-det { border: 1px solid var(--line); border-top: none; border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--bg-2); padding: 12px 14px; animation: riseIn .2s var(--ease) both; }
+.cmb-det .tool-btn { margin-top: 10px; }
+/* editor PF */
+.hp-edit { display: flex; flex-direction: column; gap: 8px; }
+.hp-edit .hp-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hp-edit .hp-cur { color: var(--accent-3); font-size: 1.1rem; }
+.hp-edit .hp-delta, .hp-edit .hp-max { width: 90px; padding: 8px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); font-family: inherit; text-align: center; }
+.hp-edit .hp-dmg { color: var(--blood-2); }
+.hp-edit .hp-maxlbl { font-size: .8rem; color: var(--text-dim); }
+.hp-edit .tool-btn { margin-top: 0; }
 
 /* ============================================================
    Armamenti / Equipaggiamento
