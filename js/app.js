@@ -33,6 +33,8 @@
   var linkMode = false;         // editor albero: modalità "collega bolle"
   var linkFrom = null;          // editor albero: prima bolla selezionata per il collegamento
   var masterProgress = {};      // progressi ricevuti: { memberId: {treeId,ranks,points,charName} }
+  // Combattimento (Fight)
+  var fight = { ongoing: false, myInit: null, enemies: [], inits: {}, order: [] };
 
   function showView(name, isBack) {
     var next = document.getElementById('view-' + name);
@@ -72,6 +74,7 @@
     if (name === 'session') { renderSession(); }
     if (name === 'messages') { renderMessages(); clearUnread(); }
     if (name === 'ability-editor') { renderAbilityEditor(); }
+    if (name === 'fight') { renderFight(); }
   }
 
   /* ============================================================
@@ -1439,6 +1442,7 @@
     ctx = ctx || {};
     var rerender = ctx.rerender || defaultRerender;
     var mode = ctx.mode || 'equip';
+    var wrap = document.createElement('div'); wrap.className = 'item-card-wrap';
     var e = document.createElement('div'); e.className = 'entry item-card' + (mode === 'equip' && it.equipped ? ' equipped' : '');
     var lead = (mode === 'equip')
       ? '<button class="eq-star" title="Equipaggia" aria-label="Equipaggia">' + (it.equipped ? '★' : '☆') + '</button>'
@@ -1446,9 +1450,11 @@
     e.innerHTML = lead +
       '<div class="e-main"><div class="e-name">' + esc(it.name || itemDefaultName(it)) + '</div>' +
       '<div class="e-sub">' + itemMeta(it) + '</div></div>' +
+      '<span class="ic-chev" aria-hidden="true">▾</span>' +
       (mode === 'arsenal' ? '<button class="ic-send" title="Invia a un giocatore" aria-label="Invia">📤</button>' : '') +
       '<button class="ic-edit" title="Modifica" aria-label="Modifica">✎</button>' +
       '<button class="e-del" title="Rimuovi" aria-label="Rimuovi">×</button>';
+    var det = document.createElement('div'); det.className = 'item-det'; det.hidden = true; det.innerHTML = itemDetailHtml(it);
     if (mode === 'equip') e.querySelector('.eq-star').addEventListener('click', function (ev) { ev.stopPropagation(); toggleEquip(c, it); });
     if (mode === 'arsenal') e.querySelector('.ic-send').addEventListener('click', function (ev) { ev.stopPropagation(); sendArsenalItem(it); });
     e.querySelector('.ic-edit').addEventListener('click', function (ev) { ev.stopPropagation(); itemDialog(c, it, { cat: it.cat, magic: it.magic, rerender: rerender }); });
@@ -1457,8 +1463,10 @@
       c.sheet.armamenti.items = eqItems(c).filter(function (x) { return x.id !== it.id; });
       persist(); rerender();
     });
-    e.addEventListener('click', function () { itemDialog(c, it, { cat: it.cat, magic: it.magic, rerender: rerender }); });
-    return e;
+    // tocco sulla card = apri/chiudi l'anteprima dei dettagli (abilità + bonus)
+    e.addEventListener('click', function () { det.hidden = !det.hidden; wrap.classList.toggle('open', !det.hidden); });
+    wrap.appendChild(e); wrap.appendChild(det);
+    return wrap;
   }
 
   // scelta iniziale per "Armi e scudi", poi apre il form
@@ -1904,6 +1912,7 @@
       items.push({ ico: '📝', label: 'Note', go: function () { masterSection = 'note'; if (currentView !== 'master') navTo('master'); else renderMaster(); closeAppDrawer(); } });
       items.push({ ico: '⚔️', label: 'Arsenale', go: function () { masterSection = 'arsenale'; arsenalSub = null; if (currentView !== 'master') navTo('master'); else renderMaster(); closeAppDrawer(); } });
       items.push({ sep: true });
+      if (Net.status().connected) items.push({ ico: '⚔️', label: 'Combattimento', go: function () { closeAppDrawer(); if (!fight.ongoing) startFightFlow(); else navTo('fight'); } });
       items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
       items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
       items.push({ ico: '🖼️', label: 'Mostra immagine a tutti', go: function () { closeAppDrawer(); pickBroadcastImage(); } });
@@ -1917,6 +1926,7 @@
       }
       items.push({ ico: '🗂️', label: 'Le tue schede', go: function () { navTo('player'); } });
       items.push({ ico: '🔗', label: 'Sessione', go: function () { navTo('session'); } });
+      if (fight.ongoing) items.push({ ico: '⚔️', label: 'Combattimento', go: function () { navTo('fight'); } });
       items.push({ ico: '💬', label: 'Messaggi', badge: true, go: function () { navTo('messages'); } });
       items.push({ ico: '💾', label: 'Dati e backup', go: function () { closeAppDrawer(); openDataMenu(); } });
     }
@@ -2006,6 +2016,22 @@
     Net.on('tree-unlock', function (d) { applyUnlock(d.treeId, d.nodeId, d.unlocked); });
     Net.on('points-grant', function (d) { applyPointsGrant(d.amount); });
     Net.on('equip-push', function (d) { applyIncomingEquip(d.item); });
+    Net.on('fight-start', function () {
+      if (appRole === 'player') { fight.ongoing = true; fight.myInit = null; showFightInvite(); }
+    });
+    Net.on('fight-init', function (d) {
+      if (appRole !== 'master') return;
+      fight.inits[d.from] = { name: d.charName || rosterNameFor(d.from), value: d.value };
+      recomputeOrderAndBroadcast();
+      if (currentView === 'fight') renderFight();
+      toast((d.charName || 'Un giocatore') + ': iniziativa ' + d.value, 'ok');
+    });
+    Net.on('fight-order', function (d) { fight.order = d.order || []; if (currentView === 'fight') renderFight(); });
+    Net.on('fight-end', function () {
+      fight.ongoing = false; fight.myInit = null; fight.inits = {}; fight.order = [];
+      var inv = $('#fight-invite'); if (inv) inv.hidden = true;
+      if (currentView === 'fight') { toast('Combattimento terminato', 'ok'); navTo(appRole === 'master' ? 'master' : 'session'); }
+    });
     Net.on('tree-progress', function (d) {
       masterProgress[d.from] = d;
       if (currentView === 'ability-editor') renderAbilityEditor();
@@ -2133,7 +2159,8 @@
       card.innerHTML = '<h3>Partita in corso · ' + esc(masterCampaign().name) + '</h3>' +
         '<div class="code-display"><div class="code">' + esc(st.code || '') + '</div>' +
         '<div class="code-hint">I giocatori entrano con questo codice (stessa rete o hotspot)</div></div>';
-      acts.appendChild(btn('🖼️ Mostra immagine', 'primary', pickBroadcastImage));
+      acts.appendChild(btn('⚔️ Combattimento', 'primary', startFightFlow));
+      acts.appendChild(btn('🖼️ Mostra immagine', '', pickBroadcastImage));
       acts.appendChild(btn('💬 Messaggi', '', function () { navTo('messages'); }));
       acts.appendChild(btn('🔗 Gestisci', '', function () { navTo('session'); }));
       acts.appendChild(btn('Termina', 'danger', function () { Net.leave(); }));
@@ -2430,6 +2457,168 @@
     ta.addEventListener('input', function () { clearTimeout(t); t = setTimeout(function () { sess.notes = ta.value; persist(); }, 350); });
     var wrap = document.createElement('div'); wrap.className = 'field'; wrap.appendChild(ta);
     body.appendChild(wrap);
+  }
+
+  /* ============================================================
+     COMBATTIMENTO (Fight) — invito, iniziativa, ordine condiviso
+     ============================================================ */
+  function rollD100() { return Math.floor(Math.random() * 100) + 1; }
+  function rosterNameFor(id) {
+    var m = (netMembers || []).filter(function (x) { return x.id === id; })[0];
+    return m ? (m.charName || m.name) : 'Giocatore';
+  }
+  function computeFightOrder() {
+    var arr = [];
+    Object.keys(fight.inits).forEach(function (id) { var e = fight.inits[id]; arr.push({ name: e.name || rosterNameFor(id), value: e.value, kind: 'player' }); });
+    fight.enemies.forEach(function (en) { arr.push({ name: en.name, value: en.init, kind: 'enemy' }); });
+    arr.sort(function (a, b) { return (b.value || 0) - (a.value || 0); });
+    return arr;
+  }
+  function recomputeOrderAndBroadcast() {
+    fight.order = computeFightOrder();
+    if (appRole === 'master' && Net.status().connected) Net.broadcastFightOrder(fight.order);
+  }
+
+  // MASTER: avvia il combattimento
+  function startFightFlow() {
+    if (typeof Net === 'undefined' || !Net.status().connected) { toast('Avvia prima la sessione', 'err'); return; }
+    fight.ongoing = true; fight.inits = {}; fight.order = [];
+    Net.startFight();
+    recomputeOrderAndBroadcast();
+    navTo('fight');
+    toast('Invito al combattimento inviato', 'ok');
+  }
+  function endFightFlow() {
+    confirmDialog('Termina combattimento', 'Vuoi terminare il combattimento per tutti?', 'Termina', true).then(function (ok) {
+      if (!ok) return;
+      Net.endFight();
+      fight.ongoing = false; fight.myInit = null; fight.inits = {}; fight.enemies = []; fight.order = [];
+      navTo('master');
+    });
+  }
+
+  function showFightInvite() {
+    var inv = $('#fight-invite'); if (!inv) return;
+    inv.hidden = false;
+  }
+
+  function renderFight() {
+    var body = $('#fight-body'); if (!body) return;
+    body.innerHTML = '';
+    if (appRole === 'master') renderFightMaster(body);
+    else renderFightPlayer(body);
+  }
+
+  function orderList(order) {
+    var box = document.createElement('div'); box.className = 'init-order';
+    if (!order || !order.length) { box.appendChild(emptyHint('Ancora nessuna iniziativa.')); return box; }
+    order.forEach(function (o, i) {
+      var row = document.createElement('div'); row.className = 'init-row ' + (o.kind === 'enemy' ? 'is-enemy' : 'is-player');
+      row.innerHTML = '<span class="init-pos">' + (i + 1) + '</span>' +
+        '<span class="init-ico">' + (o.kind === 'enemy' ? '👹' : '⚔️') + '</span>' +
+        '<span class="init-name">' + esc(o.name) + '</span>' +
+        '<span class="init-val">' + (o.value != null ? o.value : '—') + '</span>';
+      box.appendChild(row);
+    });
+    return box;
+  }
+
+  function renderFightMaster(body) {
+    var st = Net.status();
+    var top = document.createElement('div'); top.className = 'panel-card';
+    top.innerHTML = '<h3>⚔️ Combattimento</h3><p class="muted">I giocatori tirano (o inseriscono) l\'iniziativa. Aggiungi i nemici e tira per loro col d100.</p>';
+    var acts = document.createElement('div'); acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;';
+    acts.appendChild(btn('📣 Re-invita', '', function () { if (Net.startFight()) toast('Invito rinviato', 'ok'); }));
+    acts.appendChild(btn('🖼️ Immagine', '', pickBroadcastImage));
+    acts.appendChild(btn('Termina', 'danger', endFightFlow));
+    top.appendChild(acts);
+    body.appendChild(top);
+
+    // Nemici del master
+    var enemCard = document.createElement('div'); enemCard.className = 'panel-card';
+    enemCard.innerHTML = '<h3>👹 Nemici</h3>';
+    enemCard.appendChild(btn('＋ Nemico', 'primary', addEnemyDialog)).classList.add('equip-create');
+    if (!fight.enemies.length) { var ph = document.createElement('p'); ph.className = 'muted'; ph.style.margin = '4px 2px 0'; ph.textContent = 'Nessun nemico in campo.'; enemCard.appendChild(ph); }
+    fight.enemies.forEach(function (en) {
+      var r = document.createElement('div'); r.className = 'entry';
+      r.innerHTML = '<span class="e-val">' + en.init + '</span><div class="e-main"><div class="e-name">' + esc(en.name) + '</div></div>' +
+        '<button class="b-del" aria-label="Rimuovi">×</button>';
+      r.querySelector('.b-del').addEventListener('click', function () {
+        fight.enemies = fight.enemies.filter(function (x) { return x.id !== en.id; });
+        recomputeOrderAndBroadcast(); renderFight();
+      });
+      enemCard.appendChild(r);
+    });
+    body.appendChild(enemCard);
+
+    // Ordine + attesa
+    var ord = document.createElement('div'); ord.className = 'panel-card';
+    ord.innerHTML = '<h3>🎯 Ordine di iniziativa</h3>';
+    ord.appendChild(orderList(computeFightOrder()));
+    var waiting = (st.members || []).filter(function (m) { return m.role === 'player' && !fight.inits[m.id]; });
+    if (waiting.length) {
+      var w = document.createElement('p'); w.className = 'muted'; w.style.marginTop = '8px';
+      w.textContent = 'In attesa: ' + waiting.map(function (m) { return m.charName || m.name; }).join(', ');
+      ord.appendChild(w);
+    }
+    body.appendChild(ord);
+  }
+
+  function addEnemyDialog() {
+    var camp = masterCampaign();
+    var wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+    var bestOpts = '<option value="">— dal bestiario —</option>' + camp.bestiary.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name || 'Creatura') + '</option>'; }).join('');
+    wrap.innerHTML =
+      (camp.bestiary.length ? '<div class="field"><label>Dal bestiario</label><select id="en-best" class="eq-select">' + bestOpts + '</select></div>' : '') +
+      '<div class="field"><label>Nome</label><input id="en-name" maxlength="40" placeholder="Es. Goblin" /></div>' +
+      '<div class="field"><label>Iniziativa</label><div class="init-input"><input id="en-init" type="number" inputmode="numeric" min="0" placeholder="0" /><button type="button" class="tool-btn" id="en-d100">🎲 d100</button></div></div>';
+    var bsel = wrap.querySelector('#en-best');
+    if (bsel) bsel.addEventListener('change', function () {
+      var id = this.value;
+      var m = camp.bestiary.filter(function (x) { return x.id === id; })[0];
+      if (m) wrap.querySelector('#en-name').value = m.name || '';
+    });
+    wrap.querySelector('#en-d100').addEventListener('click', function () { wrap.querySelector('#en-init').value = rollD100(); });
+    function save() {
+      var name = wrap.querySelector('#en-name').value.trim();
+      if (!name) { wrap.querySelector('#en-name').focus(); toast('Dai un nome', 'err'); return; }
+      var init = parseInt(wrap.querySelector('#en-init').value, 10); if (isNaN(init)) init = 0;
+      fight.enemies.push({ id: Store.genId(), name: name, init: init });
+      recomputeOrderAndBroadcast(); closeModal(); renderFight();
+    }
+    openModal({ title: 'Aggiungi nemico', bodyNode: wrap, focus: '#en-name',
+      actions: [{ label: 'Annulla', onClick: closeModal }, { label: 'Aggiungi', cls: 'primary', onClick: save }] });
+  }
+
+  function renderFightPlayer(body) {
+    if (!Net.status().connected) { body.appendChild(panelCard('Non sei in sessione', 'Entra in una sessione per combattere.')); return; }
+    if (fight.myInit == null) {
+      var card = document.createElement('div'); card.className = 'panel-card';
+      card.innerHTML = '<h3>🎲 Tira per iniziativa o inserisci</h3><p class="muted">Puoi lasciare che l\'app tiri un d100, oppure inserire il numero che hai tirato dal vivo con i dadi fisici.</p>';
+      var acts = document.createElement('div'); acts.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;';
+      acts.appendChild(btn('🎲 Tira d100', 'primary big', function () { setMyInit(rollD100()); }));
+      acts.appendChild(btn('✍️ Inserisci il tiro', '', function () {
+        promptDialog('Inserisci iniziativa', 'Numero tirato', 'Es. 73', '', function (v) { var n = parseInt(v, 10); if (isNaN(n)) { toast('Numero non valido', 'err'); return; } setMyInit(n); });
+      }));
+      card.appendChild(acts);
+      body.appendChild(card);
+      return;
+    }
+    var mine = document.createElement('div'); mine.className = 'panel-card';
+    mine.innerHTML = '<h3>La tua iniziativa</h3><div class="my-init">' + fight.myInit + '</div>';
+    mine.appendChild(btn('↻ Ritira', '', function () { fight.myInit = null; renderFight(); }));
+    body.appendChild(mine);
+    var ord = document.createElement('div'); ord.className = 'panel-card';
+    ord.innerHTML = '<h3>🎯 Ordine di iniziativa</h3>';
+    ord.appendChild(orderList(fight.order));
+    body.appendChild(ord);
+  }
+  function setMyInit(v) {
+    fight.myInit = v;
+    var ch = activeChar();
+    Net.sendInitiative(v, ch ? charLabel(ch) : '');
+    toast('Iniziativa: ' + v, 'ok');
+    renderFight();
   }
 
   /* ---- Vista SESSIONE ---- */
@@ -3132,9 +3321,15 @@
   }
 
   /* ---- wiring eventi DOM (sessione/messaggi/spotlight/drawer) ---- */
-  ['#player-menu-btn', '#master-menu-btn', '#session-menu-btn', '#messages-menu-btn', '#abilities-menu-btn'].forEach(function (s) {
+  ['#player-menu-btn', '#master-menu-btn', '#session-menu-btn', '#messages-menu-btn', '#abilities-menu-btn', '#fight-menu-btn'].forEach(function (s) {
     var el = $(s); if (el) el.addEventListener('click', openAppDrawer);
   });
+  // invito al combattimento
+  (function () {
+    var go = $('#fi-go'), no = $('#fi-no');
+    if (go) go.addEventListener('click', function () { $('#fight-invite').hidden = true; fight.ongoing = true; navTo('fight'); });
+    if (no) no.addEventListener('click', function () { $('#fight-invite').hidden = true; });
+  })();
   $('#app-drawer-overlay').addEventListener('click', closeAppDrawer);
   $('#app-drawer-close').addEventListener('click', closeAppDrawer);
 

@@ -747,6 +747,27 @@ body::after {
 .announce-body .ann-text { font-size: 1.05rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .announce-body .ann-img { display: block; max-width: 100%; max-height: 50vh; border-radius: 8px; margin: 12px auto 0; border: 1px solid var(--line-strong); }
 .announce-card .tool-btn { margin-top: 16px; width: 100%; }
+/* invito al combattimento */
+.fight-invite .announce-head { color: var(--blood-2); font-size: 1.2rem; }
+.fi-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.fi-actions .tool-btn { margin-top: 0; }
+
+/* combattimento: iniziativa e ordine */
+.fight-body { padding: 16px; max-width: 720px; margin: 0 auto; }
+.init-input { display: flex; gap: 8px; }
+.init-input input { flex: 1; min-width: 0; }
+.my-init { font-family: 'Cinzel', serif; font-size: 3rem; font-weight: 700; color: var(--accent-3);
+  text-align: center; text-shadow: 0 0 18px var(--glow); margin: 6px 0 12px; }
+.init-order { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.init-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--surface); }
+.init-row.is-enemy { border-color: var(--blood); background: linear-gradient(150deg, #2a1212, var(--surface)); }
+.init-row.is-player { border-color: var(--accent-2); }
+.init-pos { flex: none; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: .82rem; background: var(--surface-3); color: var(--accent-3); }
+.init-ico { font-size: 1.2rem; flex: none; }
+.init-name { flex: 1; min-width: 0; font-weight: 600; }
+.init-val { flex: none; font-family: 'Cinzel', serif; font-weight: 700; font-size: 1.2rem; color: var(--accent-3); }
 
 /* ============================================================
    Armamenti / Equipaggiamento
@@ -803,6 +824,14 @@ body::after {
 .item-card .ic-edit { flex: none; width: 36px; height: 36px; border: none; background: none; cursor: pointer;
   color: var(--text-faint); font-size: 1.1rem; transition: color .2s; }
 .item-card .ic-edit:hover { color: var(--accent-3); }
+/* card oggetto espandibile (anteprima dettagli) */
+.item-card-wrap { margin-bottom: 8px; }
+.item-card-wrap .item-card { margin-bottom: 0; cursor: pointer; }
+.item-card-wrap.open .item-card { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-color: var(--accent-2); }
+.item-card .ic-chev { flex: none; width: 22px; text-align: center; color: var(--text-faint); transition: transform .2s; }
+.item-card-wrap.open .ic-chev { transform: rotate(180deg); color: var(--accent-3); }
+.item-det { border: 1px solid var(--accent-2); border-top: none; border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--bg-2); padding: 12px 14px; animation: riseIn .22s var(--ease) both; }
 
 /* scelta Fisica/Magica/Scudo */
 .choice-cards { display: flex; flex-direction: column; gap: 10px; }

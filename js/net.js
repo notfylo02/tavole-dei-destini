@@ -99,6 +99,8 @@
       routeChat(conn.peer, d);
     } else if (d.t === 'tree-progress') {
       emit('tree-progress', { from: conn.peer, treeId: d.treeId, ranks: d.ranks || {}, points: d.points, charName: d.charName || '' });
+    } else if (d.t === 'fight-init') {
+      emit('fight-init', { from: conn.peer, value: d.value, charName: d.charName || '' });
     }
   }
 
@@ -167,6 +169,9 @@
     else if (d.t === 'tree-unlock') { emit('tree-unlock', { treeId: d.treeId, nodeId: d.nodeId, unlocked: !!d.unlocked }); }
     else if (d.t === 'points-grant') { emit('points-grant', { amount: d.amount }); }
     else if (d.t === 'equip-push') { emit('equip-push', { item: d.item }); }
+    else if (d.t === 'fight-start') { emit('fight-start', {}); }
+    else if (d.t === 'fight-end') { emit('fight-end', {}); }
+    else if (d.t === 'fight-order') { emit('fight-order', { order: d.order || [] }); }
   }
 
   /* ===================== INVIO (condiviso) ===================== */
@@ -237,6 +242,29 @@
     emit('image-close', {});
   }
 
+  /* ---- Combattimento (Fight) ---- */
+  // Master → tutti: invita al combattimento (i giocatori vedono "Pronto a combattere?").
+  function startFight() {
+    if (role !== 'master' || !connected) return false;
+    Object.keys(conns).forEach(function (id) { safeSend(conns[id], { t: 'fight-start' }); });
+    return true;
+  }
+  // Master → tutti: chiude il combattimento.
+  function endFight() {
+    if (role !== 'master') return;
+    Object.keys(conns).forEach(function (id) { safeSend(conns[id], { t: 'fight-end' }); });
+  }
+  // Master → tutti: condivide l'ordine di iniziativa.
+  function broadcastFightOrder(order) {
+    if (role !== 'master' || !connected) return;
+    Object.keys(conns).forEach(function (id) { safeSend(conns[id], { t: 'fight-order', order: order || [] }); });
+  }
+  // Player → master: comunica la propria iniziativa.
+  function sendInitiative(value, charName) {
+    if (role !== 'player' || !connected) return;
+    safeSend(conns.master, { t: 'fight-init', value: value, charName: charName || '' });
+  }
+
   /* ===================== roster / membri ===================== */
   function broadcastRoster() {
     var members = roster.slice();
@@ -278,6 +306,7 @@
     broadcastImage: broadcastImage, closeImage: closeImage,
     pushTree: pushTree, unlockNode: unlockNode, grantPoints: grantPoints, pushEquip: pushEquip,
     whoami: whoami, sendProgress: sendProgress,
+    startFight: startFight, endFight: endFight, broadcastFightOrder: broadcastFightOrder, sendInitiative: sendInitiative,
     leave: leave, status: status, available: available, myId: myId
   };
   global.Net = Net;

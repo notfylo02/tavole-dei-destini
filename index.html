@@ -205,6 +205,16 @@
       <div class="ability-editor-body" id="ability-editor-body"></div>
     </section>
 
+    <!-- ===================== COMBATTIMENTO (Fight) ===================== -->
+    <section class="view" id="view-fight" data-view="fight">
+      <header class="view-head">
+        <span class="head-spacer"></span>
+        <h2 class="view-title">Combattimento</h2>
+        <button class="icon-btn nav-burger" id="fight-menu-btn" aria-label="Apri menu">☰</button>
+      </header>
+      <div class="fight-body" id="fight-body"></div>
+    </section>
+
   </main>
 
   <!-- ===================== DRAWER NAVIGAZIONE APP ===================== -->
@@ -236,6 +246,18 @@
       <div class="announce-head">📢 Messaggio dal Master</div>
       <div class="announce-body" id="announce-body"></div>
       <button class="tool-btn primary" id="announce-close">Ho capito</button>
+    </div>
+  </div>
+
+  <!-- ===================== INVITO AL COMBATTIMENTO ===================== -->
+  <div class="announce fight-invite" id="fight-invite" hidden>
+    <div class="announce-card">
+      <div class="announce-head">⚔️ Pronto a combattere?</div>
+      <div class="announce-body">Il Master ha avviato un combattimento.</div>
+      <div class="fi-actions">
+        <button class="tool-btn primary big" id="fi-go">Vai alla modalità fight</button>
+        <button class="tool-btn" id="fi-no">No, non ancora</button>
+      </div>
     </div>
   </div>
 
